@@ -204,6 +204,9 @@ export function createBarista({ THREE, room, camera, canvas, kit, onDone }) {
     } else if (name === 'cup' && ndc.y < -0.45 && st.shot > 1) {
       return serve();
     } else if (!st.pouring) {
+      // drop where the mouse is right now, even if no frame has been drawn since it last moved
+      ray.setFromCamera(ndc, camera);
+      if (ray.ray.intersectPlane(dragPlane, hit)) it.group.position.set(DRAG_X, clamp(hit.y, 0.97, 1.65), clamp(hit.z, 1.5, 2.95));
       it.loc = nearest(name) ?? it.loc;
     }
     st.pressing = st.pouring = false;

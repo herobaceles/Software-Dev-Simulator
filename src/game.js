@@ -396,7 +396,7 @@ let sipAnim = 0;
 // ───────────────────────── the world outside ─────────────────────────
 const outside = new THREE.Group();
 scene.add(outside);
-const ground = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), new THREE.MeshStandardMaterial({ color: '#4c6b55', roughness: 1 }));
+const ground = new THREE.Mesh(new THREE.PlaneGeometry(900, 900), new THREE.MeshStandardMaterial({ color: '#3f4450', roughness: 1 }));
 ground.rotation.x = -Math.PI / 2;
 ground.position.y = -22;
 outside.add(ground);
@@ -405,43 +405,284 @@ outside.add(ground);
 let seed = 7;
 const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
 
-const N_BUILD = 150;
-const buildings = new THREE.InstancedMesh(new THREE.BoxGeometry(1, 1, 1), new THREE.MeshLambertMaterial(), N_BUILD);
-const litPositions = [];
-const m4 = new THREE.Matrix4(), col = new THREE.Color();
-const palette = ['#a9b8cc', '#c9c2d6', '#d8b9a8', '#e2d2b8', '#9fb8b4'];
-for (let i = 0; i < N_BUILD; i++) {
-  const w = 5 + rnd() * 7, d = 5 + rnd() * 6, z = -60 - rnd() * 140;
-  const h = 7 + rnd() * 20 + (rnd() < 0.12 ? 14 : 0);
-  const x = (rnd() - 0.5) * (170 + -z * 1.3);
-  m4.compose(new THREE.Vector3(x, -22 + h / 2, z), new THREE.Quaternion(), new THREE.Vector3(w, h, d));
-  buildings.setMatrixAt(i, m4);
-  buildings.setColorAt(i, col.set(palette[i % palette.length]));
-  const cols = Math.floor(w / 1.6), rows = Math.floor(h / 2.4);
-  for (let c = 0; c < cols; c++) for (let r = 0; r < rows; r++) {
-    if (rnd() < 0.42) litPositions.push([x - w / 2 + (c + 0.5) * (w / cols), -22 + 1.6 + r * 2.4, z + d / 2 + 0.06, rnd()]);
+// ── The city ──
+// Streets form a grid: east-west roads every 40 m (the first one runs right below the window)
+// and north-south roads every 48 m. Buildings fill the blocks in between, low-rise in the
+// nearest row and rising toward a skyline of towers.
+const GROUND_Y = -22;
+const ROADS = { z0: -14, zStep: 40, x0: 24, xStep: 48, half: 6, walk: 2.5 };
+const ROWS = [
+  { h: [6, 15], palette: ['#b9a79a', '#c9b8a6', '#a9a39c', '#c2a48f'] },
+  { h: [12, 26], palette: ['#b3a79c', '#a7b0bb', '#c4b7a8', '#9da6b0'] },
+  { h: [18, 38], palette: ['#9fb0c4', '#aab4c2', '#b8c0cc', '#8fa3b8'] },
+  { h: [26, 54], palette: ['#93a7bf', '#a3b1c4', '#8a9db5', '#b0bccb'] },
+  { h: [34, 70], palette: ['#7f93ad', '#8aa0bb', '#96a8bf', '#6f86a3'] },
+  { h: [40, 84], palette: ['#7389a6', '#8196b2', '#6b819e', '#8ea1ba'] },
+];
+const cityBoxes = [];  // [x, y, z, w, h, d, color, style, hasWindows]
+const beaconPos = [];  // aircraft warning lights on top of spires
+const span = ([lo, hi]) => lo + rnd() * (hi - lo);
+
+function addBuilding(x, z, w, h, d, color) {
+  const style = rnd();
+  cityBoxes.push([x, GROUND_Y + h / 2, z, w, h, d, color, style, 1]);
+  let top = GROUND_Y + h;
+  if (h > 26 && rnd() < 0.7) {
+    // towers step in near the top, and some carry a spire
+    const crown = h * (0.12 + rnd() * 0.15);
+    cityBoxes.push([x, top + crown / 2, z, w * 0.62, crown, d * 0.62, color, style, 1]);
+    top += crown;
+    if (rnd() < 0.6) {
+      const spire = 6 + rnd() * 14;
+      cityBoxes.push([x, top + spire / 2, z, 0.5, spire, 0.5, '#cfd6e0', 0, 0]);
+      beaconPos.push(x, top + spire + 0.4, z);
+    }
+  } else {
+    // rooftop clutter: a plant room and a water tank or stair head
+    cityBoxes.push([x + w * 0.18, top + 0.9, z - d * 0.1, w * 0.32, 1.8, d * 0.3, '#8d8d92', 0, 0]);
+    if (rnd() < 0.6) cityBoxes.push([x - w * 0.26, top + 0.6, z + d * 0.2, w * 0.16, 1.2, d * 0.18, '#a39c93', 0, 0]);
   }
 }
-outside.add(buildings);
-const cityLights = new THREE.InstancedMesh(
-  new THREE.PlaneGeometry(0.75, 1.0),
-  new THREE.MeshBasicMaterial({ transparent: true, opacity: 0, fog: false, depthWrite: false }),
-  litPositions.length,
-);
-litPositions.forEach(([x, y, z, r], i) => {
-  m4.makeTranslation(x, y, z);
-  cityLights.setMatrixAt(i, m4);
-  cityLights.setColorAt(i, col.set(r < 0.7 ? '#ffd58a' : r < 0.9 ? '#fff1d0' : '#9fd0ff'));
-});
-outside.add(cityLights);
 
-// hills
-for (let i = 0; i < 7; i++) {
-  const r = 55 + rnd() * 45;
-  const hill = new THREE.Mesh(new THREE.SphereGeometry(r, 20, 12), new THREE.MeshStandardMaterial({ color: '#4f7a5e', roughness: 1 }));
-  hill.position.set(-260 + i * 85 + rnd() * 30, -40, -210 - rnd() * 30);
-  hill.scale.y = 0.55 + rnd() * 0.25;
-  outside.add(hill);
+ROWS.forEach((row, r) => {
+  const edge = ROADS.half + ROADS.walk;
+  const zNear = ROADS.z0 - ROADS.zStep * r - edge, depth = ROADS.zStep - edge * 2;
+  for (let k = -7; k <= 6; k++) {
+    const xLeft = ROADS.x0 + ROADS.xStep * k + edge, width = ROADS.xStep - edge * 2;
+    const nx = rnd() < 0.35 ? 1 : 2, nz = r > 0 && rnd() < 0.4 ? 2 : 1;
+    for (let ix = 0; ix < nx; ix++) for (let iz = 0; iz < nz; iz++) {
+      if (rnd() < 0.07) continue; // leave the odd lot empty as a little plaza
+      const lotW = width / nx, lotD = depth / nz;
+      const w = lotW - 1.2 - rnd() * 2, d = lotD - 1.2 - rnd() * 2;
+      const h = span(row.h) * (rnd() < 0.12 ? 1.3 : 1);
+      addBuilding(xLeft + lotW * (ix + 0.5), zNear - lotD * (iz + 0.5), w, h, d, row.palette[(k + 7 + ix + iz) % row.palette.length]);
+    }
+  }
+});
+
+const m4 = new THREE.Matrix4(), col = new THREE.Color(), v3 = new THREE.Vector3(), scale3 = new THREE.Vector3(), noTurn = new THREE.Quaternion();
+
+// Shared by the building and street shaders: they need each pixel's position in the world.
+const WORLD_POS_VERTEX = `
+  vec4 cityWorld = vec4(transformed, 1.0);
+  #ifdef USE_INSTANCING
+    cityWorld = instanceMatrix * cityWorld;
+  #endif
+  vWPos = (modelMatrix * cityWorld).xyz;
+`;
+const cityUniforms = { uNight: { value: 0 } };
+
+// Facades are drawn in the shader from world position, so every building gets windows on all
+// sides without a texture per building. `aInfo` = (style 0..1, roof height, has windows).
+const facadeMat = new THREE.MeshLambertMaterial();
+facadeMat.onBeforeCompile = (shader) => {
+  shader.uniforms.uNight = cityUniforms.uNight;
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nattribute vec3 aInfo;\nvarying vec3 vWPos;\nvarying vec3 vWNormal;\nvarying vec3 vInfo;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>' + WORLD_POS_VERTEX + '  vWNormal = normal;\n  vInfo = aInfo;');
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nuniform float uNight;\nvarying vec3 vWPos;\nvarying vec3 vWNormal;\nvarying vec3 vInfo;')
+    .replace('#include <color_fragment>', `#include <color_fragment>
+      float cityGlow = 0.0;
+      float cityRnd = 0.0;
+      vec3 cityFace = abs(vWNormal);
+      if (vInfo.z > 0.5 && cityFace.y < 0.5) {
+        float style = vInfo.x;
+        float along = cityFace.x > 0.5 ? vWPos.z : vWPos.x;
+        float height = vWPos.y - (${GROUND_Y.toFixed(1)});
+        // three looks: punched windows, ribbon glazing, and curtain wall
+        vec2 size = style < 0.34 ? vec2(2.4, 3.2) : style < 0.67 ? vec2(3.0, 3.4) : vec2(1.5, 3.6);
+        vec2 lo = style < 0.34 ? vec2(0.22, 0.28) : style < 0.67 ? vec2(-1.0, 0.38) : vec2(0.06, 0.08);
+        vec2 hi = style < 0.34 ? vec2(0.78, 0.80) : style < 0.67 ? vec2(2.0, 0.84) : vec2(0.94, 0.90);
+        vec2 cell = vec2(along, height) / size;
+        vec2 id = floor(cell), f = fract(cell), fw = fwidth(cell);
+        vec2 pane = smoothstep(lo - fw, lo + fw, f) * (1.0 - smoothstep(hi - fw, hi + fw, f));
+        float cover = (min(hi.x, 1.0) - max(lo.x, 0.0)) * (hi.y - lo.y);
+        // far away the grid is finer than a pixel, so blend to its average instead of shimmering
+        float detail = 1.0 - smoothstep(0.3, 0.8, max(fw.x, fw.y));
+        float parapet = step(vInfo.y - 1.1, vWPos.y);
+        float shopfront = 1.0 - step(4.2, height);
+        float win = mix(cover, pane.x * pane.y, detail) * (1.0 - parapet);
+        cityRnd = fract(sin(dot(id + cityFace.x * 31.0 + style * 57.0, vec2(12.9898, 78.233))) * 43758.5453);
+        vec3 glass = mix(vec3(0.12, 0.18, 0.26), vec3(0.40, 0.56, 0.70), cityRnd * 0.7 + 0.2 * style);
+        diffuseColor.rgb *= 1.0 - 0.28 * parapet - 0.18 * shopfront;
+        diffuseColor.rgb = mix(diffuseColor.rgb, glass, win * 0.92);
+        // a thin shadow line under each floor gives the wall some depth
+        diffuseColor.rgb *= 1.0 - 0.12 * detail * (1.0 - smoothstep(0.0, 0.06, f.y)) * (1.0 - parapet);
+        float lit = mix(0.24, step(0.74, cityRnd), detail);
+        cityGlow = win * max(lit, shopfront * 0.8);
+      }`)
+    .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      totalEmissiveRadiance += mix(vec3(1.0, 0.80, 0.48), vec3(0.62, 0.80, 1.0), step(0.95, cityRnd)) * cityGlow * uNight * (0.35 + 0.45 * cityRnd);`);
+};
+const facadeGeo = new THREE.BoxGeometry(1, 1, 1);
+const facadeInfo = new Float32Array(cityBoxes.length * 3);
+const buildings = new THREE.InstancedMesh(facadeGeo, facadeMat, cityBoxes.length);
+cityBoxes.forEach(([x, y, z, w, h, d, color, style, hasWindows], i) => {
+  buildings.setMatrixAt(i, m4.compose(v3.set(x, y, z), noTurn, scale3.set(w, h, d)));
+  buildings.setColorAt(i, col.set(color));
+  facadeInfo.set([style, y + h / 2, hasWindows], i * 3);
+});
+facadeGeo.setAttribute('aInfo', new THREE.InstancedBufferAttribute(facadeInfo, 3));
+outside.add(buildings);
+
+const beaconGeo = new THREE.BufferGeometry();
+beaconGeo.setAttribute('position', new THREE.Float32BufferAttribute(beaconPos, 3));
+const beacons = new THREE.Points(beaconGeo, new THREE.PointsMaterial({ color: '#ff4a3d', size: 4, sizeAttenuation: false, transparent: true, opacity: 0, fog: false }));
+outside.add(beacons);
+
+// The street level, also drawn in a shader: asphalt, pavements, lane dashes and zebra crossings.
+const streetMat = new THREE.MeshLambertMaterial();
+streetMat.onBeforeCompile = (shader) => {
+  shader.vertexShader = shader.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
+    .replace('#include <begin_vertex>', '#include <begin_vertex>' + WORLD_POS_VERTEX);
+  shader.fragmentShader = shader.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vWPos;')
+    .replace('#include <color_fragment>', `#include <color_fragment>
+      float roadHalf = ${ROADS.half.toFixed(1)}, kerb = ${(ROADS.half + ROADS.walk).toFixed(1)};
+      float dz = abs(mod(vWPos.z - (${ROADS.z0.toFixed(1)}) + ${(ROADS.zStep / 2).toFixed(1)}, ${ROADS.zStep.toFixed(1)}) - ${(ROADS.zStep / 2).toFixed(1)});
+      float dx = abs(mod(vWPos.x - ${ROADS.x0.toFixed(1)} + ${(ROADS.xStep / 2).toFixed(1)}, ${ROADS.xStep.toFixed(1)}) - ${(ROADS.xStep / 2).toFixed(1)});
+      float aa = fwidth(vWPos.x) + fwidth(vWPos.z);
+      // the cross streets stop at the road below the window instead of running under your building
+      float beyond = step(vWPos.z, ${(ROADS.z0 + ROADS.half).toFixed(1)});
+      float roadEW = 1.0 - smoothstep(roadHalf - aa, roadHalf + aa, dz);
+      float roadNS = (1.0 - smoothstep(roadHalf - aa, roadHalf + aa, dx)) * beyond;
+      float road = max(roadEW, roadNS);
+      float pavement = max(1.0 - smoothstep(kerb - aa, kerb + aa, dz), (1.0 - smoothstep(kerb - aa, kerb + aa, dx)) * beyond);
+      vec3 street = mix(vec3(0.34, 0.37, 0.34), vec3(0.60, 0.59, 0.56), pavement);
+      street = mix(street, vec3(0.15, 0.16, 0.18), road);
+      float fine = 1.0 - smoothstep(0.12, 0.5, aa);
+      float dashEW = (1.0 - smoothstep(0.13, 0.13 + aa, dz)) * step(0.5, fract(vWPos.x / 7.0)) * (1.0 - roadNS);
+      float dashNS = (1.0 - smoothstep(0.13, 0.13 + aa, dx)) * step(0.5, fract(vWPos.z / 7.0)) * (1.0 - roadEW) * beyond;
+      float zebraEW = roadEW * step(roadHalf + 0.6, dx) * step(dx, roadHalf + 3.4) * step(0.5, fract(vWPos.z / 1.3)) * beyond;
+      float zebraNS = roadNS * step(roadHalf + 0.6, dz) * step(dz, roadHalf + 3.4) * step(0.5, fract(vWPos.x / 1.3));
+      float paint = max(max(dashEW, dashNS), max(zebraEW, zebraNS) * 0.9) * fine;
+      diffuseColor.rgb = mix(street, vec3(0.86, 0.85, 0.80), paint) * diffuse;
+      // pools of light under street lamps, spaced along both kerbs
+      vec2 lampEW = vec2((fract(vWPos.x / 22.0) - 0.5) * 22.0, dz - roadHalf - 0.8);
+      vec2 lampNS = vec2((fract(vWPos.z / 22.0) - 0.5) * 22.0, dx - roadHalf - 0.8);
+      float lampPool = max(exp(-dot(lampEW, lampEW) / 26.0), exp(-dot(lampNS, lampNS) / 26.0) * beyond);
+      vec3 lampGlow = vec3(1.0, 0.74, 0.42) * lampPool * mix(street, vec3(0.86), paint);`)
+    .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      totalEmissiveRadiance += lampGlow * uNight * 0.75;`);
+  shader.uniforms.uNight = cityUniforms.uNight;
+  shader.fragmentShader = shader.fragmentShader.replace('varying vec3 vWPos;', 'varying vec3 vWPos;\nuniform float uNight;');
+};
+ground.material = streetMat;
+
+// Street trees along the road below the window and the boulevard behind it.
+const treeSpots = [];
+for (const roadZ of [ROADS.z0, ROADS.z0 - ROADS.zStep]) {
+  for (const side of [-1, 1]) for (let x = -230; x <= 230; x += 9.5) {
+    const nearCrossing = Math.abs(((x - ROADS.x0 + ROADS.xStep * 10.5) % ROADS.xStep) - ROADS.xStep / 2) < ROADS.half + 4;
+    if (!nearCrossing || (roadZ === ROADS.z0 && side === 1)) treeSpots.push([x + rnd() * 2, roadZ + side * (ROADS.half + 1.3), 0.8 + rnd() * 0.5]);
+  }
+}
+const treeTops = new THREE.InstancedMesh(new THREE.SphereGeometry(1.7, 12, 10), new THREE.MeshLambertMaterial(), treeSpots.length);
+const treeTrunks = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.16, 0.2, 2.4, 8), new THREE.MeshLambertMaterial({ color: '#6b4a35' }), treeSpots.length);
+treeSpots.forEach(([x, z, size], i) => {
+  treeTops.setMatrixAt(i, m4.compose(v3.set(x, GROUND_Y + 2.4 + size * 1.3, z), noTurn, scale3.set(size, size * 1.15, size)));
+  treeTops.setColorAt(i, col.set(['#4f8a57', '#5d9a62', '#467c50'][i % 3]));
+  treeTrunks.setMatrixAt(i, m4.makeTranslation(x, GROUND_Y + 1.2, z));
+});
+outside.add(treeTops, treeTrunks);
+
+// Traffic: each car keeps to its lane and wraps around when it leaves the city.
+const cars = [];
+const CAR_COLORS = ['#e8e8ea', '#2f3640', '#c0392b', '#2e6fb5', '#f1c40f', '#f1c40f', '#7f8c8d', '#ffffff', '#1e8449'];
+function addCars(count, eastWest, roadAt, from, to) {
+  for (let i = 0; i < count; i++) {
+    const dir = i % 2 ? 1 : -1, bus = rnd() < 0.1;
+    cars.push({ eastWest, lane: roadAt + (eastWest ? dir : -dir) * 3, at: from + rnd() * (to - from), from, to, dir, speed: 9 + rnd() * 7, length: bus ? 10.5 : 4.4, height: bus ? 2.9 : 1.45, color: bus ? '#d35400' : CAR_COLORS[Math.floor(rnd() * CAR_COLORS.length)] });
+  }
+}
+addCars(16, true, ROADS.z0, -300, 300);
+addCars(14, true, ROADS.z0 - ROADS.zStep, -300, 300);
+for (let r = 2; r <= 4; r++) addCars(8, true, ROADS.z0 - ROADS.zStep * r, -300, 300);
+for (let k = -4; k <= 3; k++) addCars(5, false, ROADS.x0 + ROADS.xStep * k, -250, ROADS.z0);
+const carMesh = new THREE.InstancedMesh(new RoundedBoxGeometry(1, 1, 1, 2, 0.18), new THREE.MeshLambertMaterial(), cars.length);
+cars.forEach((car, i) => carMesh.setColorAt(i, col.set(car.color)));
+carMesh.frustumCulled = false;
+outside.add(carMesh);
+const lamps = (color) => {
+  const geo = new THREE.BufferGeometry();
+  geo.setAttribute('position', new THREE.BufferAttribute(new Float32Array(cars.length * 3), 3));
+  const points = new THREE.Points(geo, new THREE.PointsMaterial({ color, size: 3.2, sizeAttenuation: false, transparent: true, opacity: 0, fog: false, depthWrite: false }));
+  points.frustumCulled = false;
+  outside.add(points);
+  return points;
+};
+const headlights = lamps('#fff3c4'), taillights = lamps('#ff3b30');
+
+// Elevated metro line above the boulevard, with a train that passes every so often.
+const METRO = { y: -3, z: ROADS.z0 - ROADS.zStep, speed: 26, length: 600 };
+const concrete = new THREE.MeshLambertMaterial({ color: '#8e9199' });
+const metro = new THREE.Group();
+outside.add(metro);
+const deck = new THREE.Mesh(new THREE.BoxGeometry(METRO.length, 0.7, 4.6), concrete);
+deck.position.set(0, METRO.y - 0.35, METRO.z);
+metro.add(deck);
+for (const side of [-2.2, 2.2]) {
+  const wall = new THREE.Mesh(new THREE.BoxGeometry(METRO.length, 0.8, 0.18), concrete);
+  wall.position.set(0, METRO.y + 0.4, METRO.z + side);
+  metro.add(wall);
+}
+const pillarHeight = METRO.y - 0.7 - GROUND_Y;
+const pillars = new THREE.InstancedMesh(new THREE.BoxGeometry(1.4, pillarHeight, 1.2), concrete, Math.floor(METRO.length / 16) + 1);
+for (let i = 0; i < pillars.count; i++) pillars.setMatrixAt(i, m4.makeTranslation(-METRO.length / 2 + i * 16, GROUND_Y + pillarHeight / 2, METRO.z));
+metro.add(pillars);
+
+const train = new THREE.Group();
+metro.add(train);
+const trainBody = new THREE.MeshLambertMaterial({ color: '#e4e7ec' });
+const trainStripe = new THREE.MeshLambertMaterial({ color: '#e2483d' });
+const trainGlass = new THREE.MeshBasicMaterial({ color: '#2c3e55' });
+for (let i = -2; i <= 2; i++) {
+  const car = new THREE.Group();
+  car.position.x = i * 11.2;
+  car.add(new THREE.Mesh(new RoundedBoxGeometry(10.8, 2.7, 2.7, 3, 0.35), trainBody));
+  const stripe = new THREE.Mesh(new THREE.BoxGeometry(10.82, 0.32, 2.74), trainStripe);
+  stripe.position.y = -0.55;
+  const glass = new THREE.Mesh(new THREE.BoxGeometry(9.6, 0.85, 2.76), trainGlass);
+  glass.position.y = 0.4;
+  car.add(stripe, glass);
+  train.add(car);
+}
+const trainState = { x: -METRO.length / 2, dir: 1, wait: 4 };
+
+function updateMetro(dt, t) {
+  const night = 1 - day;
+  trainGlass.color.set('#2c3e55').lerp(tmpColor.set('#ffe2a6'), night);
+  beacons.material.opacity = night * (Math.sin(t * 2.2) > 0 ? 0.95 : 0.15);
+  if (trainState.wait > 0) {
+    trainState.wait -= dt;
+  } else {
+    trainState.x += trainState.dir * METRO.speed * dt;
+    if (Math.abs(trainState.x) > METRO.length / 2 + 40) {
+      trainState.x = Math.sign(trainState.x) * (METRO.length / 2 + 40);
+      trainState.dir = -trainState.dir;
+      trainState.wait = 5 + Math.random() * 9;
+    }
+  }
+  // each direction runs on its own track
+  train.position.set(trainState.x, METRO.y + 1.55, METRO.z + trainState.dir * 1.05);
+
+  // traffic
+  const head = headlights.geometry.attributes.position, tail = taillights.geometry.attributes.position;
+  cars.forEach((car, i) => {
+    car.at += car.dir * car.speed * dt;
+    if (car.at > car.to) car.at = car.from;
+    if (car.at < car.from) car.at = car.to;
+    const x = car.eastWest ? car.at : car.lane, z = car.eastWest ? car.lane : car.at;
+    const y = GROUND_Y + car.height / 2 + 0.1, nose = (car.dir * car.length) / 2;
+    carMesh.setMatrixAt(i, m4.compose(v3.set(x, y, z), noTurn, car.eastWest ? scale3.set(car.length, car.height, 1.9) : scale3.set(1.9, car.height, car.length)));
+    head.setXYZ(i, car.eastWest ? x + nose : x, y, car.eastWest ? z : z + nose);
+    tail.setXYZ(i, car.eastWest ? x - nose : x, y, car.eastWest ? z : z - nose);
+  });
+  carMesh.instanceMatrix.needsUpdate = true;
+  head.needsUpdate = tail.needsUpdate = true;
+  headlights.material.opacity = taillights.material.opacity = night;
 }
 
 // sun, moon, stars, clouds
@@ -519,12 +760,12 @@ function updateSky() {
   sun.visible = !S.raining;
   const night = 1 - day;
   stars.material.opacity = S.raining ? 0 : night * 0.9;
-  cityLights.material.opacity = clamp(night * 1.2 + (S.raining ? 0.25 : 0), 0, 1);
+  cityUniforms.uNight.value = clamp(night * 1.2 + (S.raining ? 0.25 : 0), 0, 1);
   cloudMat.color.setScalar(0.18 + day * 0.82).lerp(skyColor, 0.25);
   cloudMat.opacity = S.raining ? 0.95 : 0.8;
   buildings.material.color.setScalar(0.3 + day * 0.7);
   fill.intensity = 0.1 + day * 0.8 * (S.raining ? 0.6 : 1);
-  ground.material.color.set('#4c6b55').multiplyScalar(0.3 + day * 0.7);
+  ground.material.color.setScalar(0.3 + day * 0.7);
 
   const src = Math.sin(a) > -0.05 ? sun.position : moon.position;
   sunLight.position.copy(src).normalize().multiplyScalar(40).add(sunLight.target.position);
@@ -600,7 +841,7 @@ let arrived = true;
 const mouse = { x: 0, y: 0 };
 const POSES = {
   pc: { pos: new THREE.Vector3(DESK_X, 1.32, -1.7), look: new THREE.Vector3(DESK_X, 1.17, -2.8) },
-  window: { pos: new THREE.Vector3(winCx, 1.55, -2.35), look: new THREE.Vector3(winCx, 3, -40) },
+  window: { pos: new THREE.Vector3(winCx + 0.4, 1.55, -2.35), look: new THREE.Vector3(winCx, 3, -40) },
   sleep: { pos: new THREE.Vector3(-3.25, 0.9, 2.3), look: new THREE.Vector3(-2.2, 2.9, -1.5) },
   barista: { pos: new THREE.Vector3(2.72, 1.36, 2.24), look: new THREE.Vector3(3.75, 1.1, 2.24) },
 };
@@ -632,7 +873,14 @@ function updatePlayer(dt) {
     const p = POSES[mode];
     targetPos.copy(p.pos);
     lookAt.copy(p.look);
-    if (mode === 'window') lookAt.add(tmpV.set(mouse.x * 26, -mouse.y * 12, 0));
+    if (mode === 'window') {
+      // the mouse steers your gaze; moving it down leans you toward the glass so you can see the street
+      const down = Math.max(0, mouse.y);
+      targetPos.z -= down * 0.55;
+      targetPos.y += down * 0.08;
+      const pitch = 0.04 - mouse.y * (mouse.y > 0 ? 1.15 : 0.35), yaw = mouse.x * 0.6;
+      lookAt.set(Math.sin(yaw) * Math.cos(pitch), Math.sin(pitch), -Math.cos(yaw) * Math.cos(pitch)).multiplyScalar(10).add(targetPos);
+    }
     poseCam.position.copy(targetPos);
     poseCam.lookAt(lookAt);
     targetQuat.copy(poseCam.quaternion);
@@ -757,7 +1005,7 @@ function windowCaption() {
       : dusk
         ? ['The sky is doing that thing again. You should look more often.', 'Golden hour. Even the legacy code looks nice in this light.']
         : ['Clouds drift by at exactly zero story points per sprint.', 'Sunlight on the rooftops. Your eyes thank you for the break.'];
-  return lines[Math.floor(Math.random() * lines.length)] + '   (Esc to step back)';
+  return lines[Math.floor(Math.random() * lines.length)] + '   (look down to see the street · Esc to step back)';
 }
 
 function newDay() {
@@ -1031,6 +1279,7 @@ function tick() {
   updateSky();
   updatePlayer(dt);
   updateCat(dt, t);
+  updateMetro(dt, t);
   updateCoffee(dt, t);
   focusTimer -= dt;
   if (focusTimer <= 0) { focusKey = findFocus(); focusTimer = 0.08; }
@@ -1070,6 +1319,8 @@ tick();
 window.__cozy = {
   S, ide, barista, desktop, leave, catGo,
   quality: () => quality,
+  gaze(x, y) { mouse.x = x; mouse.y = y; },
+  trainAt(x) { trainState.x = x; trainState.wait = 0; },
   look(yaw, pitch) { player.yaw = yaw; player.pitch = pitch; },
   use(key) { interactions[key].action(); },
   setHour(h) { S.hour = h; },

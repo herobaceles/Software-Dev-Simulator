@@ -50,7 +50,10 @@ async function runSmoke(win) {
     for (const [name, js] of Object.entries({
       '1-room': '__cozy.sandbox(); __cozy.look(-0.45, -0.12)',
       '2-cat-walking': '__cozy.catGo(-0.6, 1.2); __cozy.look(0.4, -0.5)',
-      '3-window': '__cozy.use("window")',
+      '3-window': '__cozy.trainAt(-70); __cozy.use("window")',
+      '3b-street': '__cozy.gaze(0.15, 0.9)',
+      '3c-street-night': '__cozy.setHour(21.5)',
+      '3d-reset': '__cozy.setHour(9.2); __cozy.gaze(0, 0)',
       '4-ide-failing': '__cozy.leave(); __cozy.use("pc"); __cozy.ide.solve(document.getElementById("editor").value)',
       '5-ide-passing': `__cozy.ide.solve("${fixed}")`,
       '6-ide-loop': '__cozy.ide.solve("def paginate(items, page, size):\\n    while True:\\n        pass\\n")',
@@ -63,6 +66,7 @@ async function runSmoke(win) {
       '10b-barista-steam': '__cozy.stage({ brewing: false, shot: 27, ctl: "steam", temp: 40 }, { jug: "wand" })',
       '11-cup-in-hand': '__cozy.leave(); __cozy.look(-1.2, -0.1)',
       '12-night': '__cozy.setHour(21.5); __cozy.look(-0.3, -0.05)',
+      '12b-night-window': '__cozy.trainAt(-60); __cozy.gaze(0, 0.1); __cozy.use("window")',
       '13-fps': 'new Promise((done) => { let n = 0; const t0 = performance.now(); (function f() { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else { console.log("[fps] " + Math.round(n / 2) + " quality " + __cozy.quality().toFixed(2)); done(); } })(); })',
     })) {
       await wc.executeJavaScript(js);
