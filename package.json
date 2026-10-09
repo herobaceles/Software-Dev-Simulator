@@ -1,0 +1,17 @@
+{
+  "name": "cozy-dev-sim",
+  "version": "1.0.0",
+  "description": "A cozy 3D software engineer life simulator",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron ."
+  },
+  "license": "MIT",
+  "dependencies": {
+    "pyodide": "^314.0.7",
+    "three": "^0.186.1"
+  },
+  "devDependencies": {
+    "electron": "^44.7.0"
+  }
+}
