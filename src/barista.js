@@ -22,8 +22,8 @@ export function createBarista({ THREE, room, camera, canvas, kit, onDone }) {
   room.add(bar);
 
   // ── fixed furniture ──
-  box(0.6, 0.9, 1.45, '#8a5a3c', 3.7, 0.45, 2.225, bar);
-  box(0.64, 0.04, 1.49, '#f3e6d2', 3.7, 0.92, 2.225, bar);
+  box(0.6, 0.9, 1.45, '#141416', 3.7, 0.45, 2.225, bar);
+  box(0.64, 0.04, 1.49, '#f1f0ee', 3.7, 0.92, 2.225, bar);
   box(0.32, 0.36, 0.46, '#d5d7db', 3.8, 1.14, GROUP_Z, bar, METAL);
   box(0.36, 0.05, 0.5, '#2b2b33', 3.8, 1.345, GROUP_Z, bar);
   box(0.12, 0.07, 0.16, '#9a9da3', BAR_X, 1.21, GROUP_Z, bar, METAL);
@@ -56,7 +56,7 @@ export function createBarista({ THREE, room, camera, canvas, kit, onDone }) {
 
   function display(y, z, x) {
     const tex = canvasTexture(128, 56);
-    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.085, 0.037), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+    const face = new THREE.Mesh(new THREE.PlaneGeometry(0.085, 0.037), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
     face.position.set(x, y, z);
     face.rotation.y = -Math.PI / 2;
     bar.add(face);

@@ -49,6 +49,18 @@ async function runSmoke(win) {
   try {
     for (const [name, js] of Object.entries({
       '1-room': '__cozy.sandbox(); __cozy.look(-0.45, -0.12)',
+      '1b-bed-side': '__cozy.look(2.3, -0.12)',
+      '1c-sofa-side': '__cozy.look(3.6, -0.15)',
+      '1d-door-closed': 'console.log("[walk closed] " + __cozy.probe([[-1, 2.5], [-1, 3.1], [-1, 3.7]])); __cozy.goto(-1, 1.4); __cozy.look(Math.PI, -0.05)',
+      '1e-door-open': '__cozy.openDoor()',
+      '1f-corridor': 'console.log("[walk open] " + __cozy.probe([[-1, 2.5], [-1, 3.1], [-1, 3.7], [-1, 4.1], [3, 4.1], [5.8, 4.1], [8, 3], [8.9, 0], [-3, 3.1], [4.8, 0], [8.9, -2.4]])); __cozy.goto(-3.5, 4.1); __cozy.look(-Math.PI / 2, -0.03)',
+      '1f2-lounge-door-closed': '__cozy.openDoor(false); __cozy.goto(3.2, 4.1); __cozy.look(-Math.PI / 2, -0.03); new Promise((r) => setTimeout(r, 900)).then(() => console.log("[lounge door closed] " + __cozy.probe([[4.9, 4.1], [5.4, 4.1], [5.9, 4.1]])))',
+      '1f3-lounge-door-open': '__cozy.openDoor()',
+      '1g-lounge': '__cozy.goto(8.6, 2.2); __cozy.look(0.05, -0.12)',
+      '1h-friends': '__cozy.goto(8.9, -0.5); __cozy.look(0.75, -0.2); __cozy.use("maya")',
+      '1i-lounge-back': '__cozy.goto(7.0, -1.0); __cozy.look(-2.3, -0.1)',
+      '1j-sit-with-friends': '__cozy.use("codesk")',
+      '1k-home': '__cozy.leave(); __cozy.goto(0, 1.6); __cozy.look(-0.45, -0.12)',
       '2-cat-walking': '__cozy.catGo(-0.6, 1.2); __cozy.look(0.4, -0.5)',
       '3-window': '__cozy.trainAt(-70); __cozy.use("window")',
       '3b-street': '__cozy.gaze(0.15, 0.9)',

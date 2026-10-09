@@ -1,8 +1,9 @@
 import * as THREE from 'three';
 import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
-import { ranks } from './tickets.js';
+import { ranks, tickets } from './tickets.js';
 import { createIDE } from './ide.js';
 import { createDesktop } from './desktop.js';
+import { createBuilding } from './building.js';
 import { createBarista } from './barista.js';
 
 const $ = (id) => document.getElementById(id);
@@ -46,7 +47,7 @@ renderer.toneMappingExposure = 0.82;
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#8ec9f5');
 scene.fog = new THREE.Fog('#8ec9f5', 80, 420);
-const camera = new THREE.PerspectiveCamera(68, 1, 0.05, 500);
+const camera = new THREE.PerspectiveCamera(68, 1, 0.1, 500);
 scene.add(camera); // so things held in hand can be parented to it
 
 function resize() {
@@ -116,12 +117,14 @@ function steam(parent, x, y, z, count = 4, size = 0.02, alpha = 0.3) {
     p.material.opacity = Math.sin(phase * Math.PI) * alpha;
   });
 }
+// for flat things mounted on a surface (rugs, posters, screens): nudges them forward in depth so they don't flicker
+const DECAL = { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 };
 const METAL = { metalness: 0.25, roughness: 0.35 };
 
 // ───────────────────────── the room ─────────────────────────
 const W = 4, D = 3, H = 3; // half-width, half-depth, height
-const WIN = { x0: -2.1, x1: 0.9, y0: 0.9, y1: 2.5 };
-const wallColor = '#e9d3b8';
+const WIN = { x0: -3.2, x1: 0.9, y0: 0.35, y1: 2.72 }; // floor-to-ceiling glass
+const wallColor = '#1b1b1f';
 
 // floor
 const floorTex = canvasTexture(256, 256, (g, w, h) => {
@@ -140,10 +143,10 @@ const floor = add(new THREE.PlaneGeometry(W * 2, D * 2), mat('#ffffff', { map: f
 floor.rotation.x = -Math.PI / 2;
 
 // walls + ceiling
-slab(W * 2 + 0.4, 0.2, D * 2 + 0.4, '#f3e6d2', 0, H + 0.1, 0);
+slab(W * 2 + 0.4, 0.2, D * 2 + 0.4, '#d9d7d3', 0, H + 0.1, 0);
 slab(0.2, H, D * 2, wallColor, -W - 0.1, H / 2, 0);
 slab(0.2, H, D * 2, wallColor, W + 0.1, H / 2, 0);
-slab(W * 2 + 0.4, H, 0.2, wallColor, 0, H / 2, D + 0.1);
+// (the front wall, with its door, is built by building.js)
 // back wall with window opening
 slab(WIN.x0 + W, H, 0.2, wallColor, (-W + WIN.x0) / 2, H / 2, -D - 0.1);
 slab(W - WIN.x1, H, 0.2, wallColor, (W + WIN.x1) / 2, H / 2, -D - 0.1);
@@ -151,54 +154,53 @@ slab(WIN.x1 - WIN.x0, WIN.y0, 0.2, wallColor, (WIN.x0 + WIN.x1) / 2, WIN.y0 / 2,
 slab(WIN.x1 - WIN.x0, H - WIN.y1, 0.2, wallColor, (WIN.x0 + WIN.x1) / 2, (H + WIN.y1) / 2, -D - 0.1);
 // baseboards
 for (const [w, d, x, z] of [[W * 2, 0.04, 0, D - 0.02], [W * 2, 0.04, 0, -D + 0.02], [0.04, D * 2, -W + 0.02, 0], [0.04, D * 2, W - 0.02, 0]]) {
-  box(w, 0.12, d, '#6b4630', x, 0.06, z);
+  box(w, 0.12, d, '#0c0c0e', x, 0.06, z);
 }
 
 // window frame, glass, curtains, bench
 const winCx = (WIN.x0 + WIN.x1) / 2, winCy = (WIN.y0 + WIN.y1) / 2;
 const winW = WIN.x1 - WIN.x0, winH = WIN.y1 - WIN.y0;
-const frameColor = '#5a3a28';
+const frameColor = '#0e0e10';
 box(winW + 0.16, 0.08, 0.3, frameColor, winCx, WIN.y0, -D - 0.05);
 box(winW + 0.16, 0.08, 0.26, frameColor, winCx, WIN.y1, -D - 0.07);
 box(0.08, winH, 0.26, frameColor, WIN.x0, winCy, -D - 0.07);
 box(0.08, winH, 0.26, frameColor, WIN.x1, winCy, -D - 0.07);
-box(0.05, winH, 0.06, frameColor, winCx, winCy, -D - 0.1);
-box(winW, 0.05, 0.06, frameColor, winCx, winCy + 0.25, -D - 0.1);
+for (const k of [1, 2]) box(0.05, winH, 0.06, frameColor, WIN.x0 + (winW * k) / 3, winCy, -D - 0.1); // three tall panes
 const glass = new THREE.Mesh(
   new THREE.PlaneGeometry(winW, winH),
   new THREE.MeshStandardMaterial({ color: '#cfe8ff', transparent: true, opacity: 0.07, roughness: 0.05, depthWrite: false }),
 );
 glass.position.set(winCx, winCy, -D - 0.1);
 room.add(glass);
-box(0.45, winH + 0.5, 0.08, '#f6e7d0', WIN.x0 - 0.2, winCy + 0.05, -D + 0.07);
-box(0.45, winH + 0.5, 0.08, '#f6e7d0', WIN.x1 + 0.2, winCy + 0.05, -D + 0.07);
+box(0.45, winH + 0.5, 0.08, '#c9c9cc', WIN.x0 - 0.2, winCy + 0.05, -D + 0.07);
+box(0.45, winH + 0.5, 0.08, '#c9c9cc', WIN.x1 + 0.2, winCy + 0.05, -D + 0.07);
 box(winW + 1.1, 0.05, 0.05, frameColor, winCx, WIN.y1 + 0.32, -D + 0.07);
 const bench = new THREE.Group();
 room.add(bench);
-box(winW - 0.2, 0.38, 0.5, '#7a5238', winCx, 0.19, -D + 0.27, bench);
-box(winW - 0.3, 0.12, 0.46, '#d98f7a', winCx, 0.43, -D + 0.27, bench, { r: 0.055 });
-box(0.4, 0.3, 0.14, '#f2c57c', WIN.x0 + 0.4, 0.62, -D + 0.12, bench, { r: 0.065 }).rotation.x = -0.25;
-box(0.4, 0.3, 0.14, '#8fb8a8', WIN.x1 - 0.45, 0.62, -D + 0.12, bench, { r: 0.065 }).rotation.x = -0.25;
+box(winW - 0.2, 0.38, 0.5, '#141416', winCx, 0.19, -D + 0.27, bench);
+box(winW - 0.3, 0.12, 0.46, '#8c8f96', winCx, 0.43, -D + 0.27, bench, { r: 0.055 });
+box(0.4, 0.3, 0.14, '#d9a441', WIN.x0 + 0.4, 0.62, -D + 0.12, bench, { r: 0.065 }).rotation.x = -0.25;
+box(0.4, 0.3, 0.14, '#e8e6e2', WIN.x1 - 0.45, 0.62, -D + 0.12, bench, { r: 0.065 }).rotation.x = -0.25;
 collide(WIN.x0, WIN.x1, -D, -D + 0.55);
 
 // rug
-const rug = add(new THREE.CircleGeometry(1.35, 40), mat('#c8705c'), 0, 0.012, 0.5);
+const rug = add(new THREE.CircleGeometry(1.35, 40), mat('#3a3a40', DECAL), 0, 0.012, 0.5);
 rug.rotation.x = -Math.PI / 2;
-const rugIn = add(new THREE.RingGeometry(0.85, 0.95, 40), mat('#f6e2c3'), 0, 0.016, 0.5);
+const rugIn = add(new THREE.RingGeometry(0.85, 0.95, 40), mat('#8c8f96', { ...DECAL, polygonOffsetFactor: -4, polygonOffsetUnits: -4 }), 0, 0.018, 0.5);
 rugIn.rotation.x = -Math.PI / 2;
 
 // bed
 const bed = new THREE.Group();
 room.add(bed);
-box(1.45, 0.3, 2.2, '#6b4630', -3.25, 0.15, 1.8, bed);
+box(1.45, 0.3, 2.2, '#141416', -3.25, 0.15, 1.8, bed);
 box(1.35, 0.22, 2.1, '#fbf3e6', -3.25, 0.4, 1.8, bed, { r: 0.08 });
-box(1.44, 0.16, 1.4, '#7f9fc4', -3.25, 0.5, 1.42, bed, { r: 0.07 });
-box(1.44, 0.08, 0.25, '#f6e7d0', -3.25, 0.55, 2.1, bed, { r: 0.035 });
+box(1.44, 0.16, 1.4, '#4a4d55', -3.25, 0.5, 1.42, bed, { r: 0.07 });
+box(1.44, 0.08, 0.25, '#e8e6e2', -3.25, 0.55, 2.1, bed, { r: 0.035 });
 box(0.8, 0.16, 0.42, '#ffffff', -3.25, 0.58, 2.55, bed, { r: 0.075 }).rotation.x = 0.12;
-box(1.45, 0.95, 0.1, '#6b4630', -3.25, 0.475, 2.93, bed);
+box(1.45, 0.95, 0.1, '#55585f', -3.25, 0.475, 2.93, bed, { r: 0.045 });
 collide(-W, -2.52, 0.68, D);
 // nightstand + clock
-box(0.45, 0.5, 0.45, '#7a5238', -2.2, 0.25, 2.7);
+box(0.45, 0.5, 0.45, '#141416', -2.2, 0.25, 2.7);
 box(0.2, 0.12, 0.08, '#2b2b33', -2.2, 0.56, 2.7, room, { emissive: '#ff7a59', emissiveIntensity: 0.4 });
 collide(-2.45, -1.95, 2.45, D);
 
@@ -206,28 +208,29 @@ collide(-2.45, -1.95, 2.45, D);
 const DESK_X = 2.65;
 const desk = new THREE.Group();
 room.add(desk);
-box(2.0, 0.06, 0.8, '#b98558', 2.5, 0.75, -2.55, desk);
-for (const [x, z] of [[1.58, -2.87], [3.42, -2.87], [1.58, -2.23], [3.42, -2.23]]) box(0.07, 0.72, 0.07, '#5a3a28', x, 0.36, z, desk);
+box(2.0, 0.06, 0.8, '#6e4a32', 2.5, 0.75, -2.55, desk);
+for (const [x, z] of [[1.58, -2.87], [3.42, -2.87], [1.58, -2.23], [3.42, -2.23]]) box(0.07, 0.72, 0.07, '#0e0e10', x, 0.36, z, desk);
 
 const ALU = '#d3d5d9', SATIN = { metalness: 0.3, roughness: 0.4 };
-function monitor(x, turn) {
+function monitor(x, turn, portrait = false) {
+  const w = portrait ? 0.5 : 0.84, h = portrait ? 0.84 : 0.5, cy = portrait ? 1.27 : 1.2;
   const g = new THREE.Group();
   g.position.set(x, 0, -2.76);
   g.rotation.y = turn;
   desk.add(g);
   // aluminium display on an L-shaped stand
   box(0.22, 0.012, 0.17, ALU, 0, 0.787, 0.01, g, SATIN);
-  box(0.13, 0.22, 0.014, ALU, 0, 0.89, -0.04, g, SATIN);
-  box(0.84, 0.5, 0.026, ALU, 0, 1.2, -0.003, g, { ...SATIN, r: 0.012 });
-  box(0.826, 0.486, 0.01, '#050506', 0, 1.2, 0.009, g, { r: 0.004 });
-  const tex = canvasTexture(640, 360);
-  const face = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.45), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
-  face.position.set(0, 1.2, 0.0145);
+  box(0.13, cy - 0.78, 0.014, ALU, 0, (cy + 0.78) / 2, -0.04, g, SATIN);
+  box(w, h, 0.026, ALU, 0, cy, -0.003, g, { ...SATIN, r: 0.012 });
+  box(w - 0.014, h - 0.014, 0.01, '#050506', 0, cy, 0.009, g, { r: 0.004 });
+  const tex = canvasTexture(portrait ? 360 : 640, portrait ? 640 : 360);
+  const face = new THREE.Mesh(new THREE.PlaneGeometry(w - 0.04, h - 0.04 * (h / w)), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false, ...DECAL }));
+  face.position.set(0, cy, 0.016);
   g.add(face);
   return tex;
 }
-const codeScreen = monitor(DESK_X - 0.43, 0.2);
-const termScreen = monitor(DESK_X + 0.43, -0.2);
+const codeScreen = monitor(DESK_X - 0.3, 0.12);
+const termScreen = monitor(DESK_X + 0.41, -0.32, true);
 // Mac mini, keyboard and trackpad
 box(0.2, 0.045, 0.2, ALU, 3.3, 0.803, -2.42, desk, { ...SATIN, r: 0.02 });
 box(0.9, 0.006, 0.34, '#3a3540', DESK_X - 0.05, 0.784, -2.36, desk, { r: 0.003 });
@@ -300,17 +303,17 @@ collide(-3.75, -3.25, -2.75, -2.25);
 // plant
 const plant = new THREE.Group();
 room.add(plant);
-cyl(0.17, 0.13, 0.3, '#d98f7a', 1.2, 0.15, -2.65, plant);
+cyl(0.17, 0.13, 0.3, '#e8e6e2', 1.2, 0.15, -2.65, plant);
 for (const [x, y, z, s] of [[0, 0.55, 0, 0.26], [0.14, 0.75, 0.05, 0.2], [-0.13, 0.72, -0.04, 0.2], [0.02, 0.95, 0.02, 0.17]]) {
   add(new THREE.SphereGeometry(s, 20, 16), mat(y > 0.8 ? '#6aab78' : '#5d9c6b'), 1.2 + x, y, -2.65 + z, plant).scale.y = 0.9;
 }
 collide(1.0, 1.4, -2.85, -2.45);
 
 // bookshelf
-box(0.36, 2.0, 1.4, '#6b4630', 3.8, 1.0, 0.7);
+box(0.36, 2.0, 1.4, '#141416', 3.8, 1.0, 0.7);
 const bookColors = ['#f28b82', '#f2c57c', '#8fb8a8', '#7f9fc4', '#c9a0dc', '#f6e7d0', '#d98f7a'];
 for (let s = 0; s < 4; s++) {
-  box(0.34, 0.04, 1.34, '#8a5a3c', 3.78, 0.25 + s * 0.48, 0.7);
+  box(0.34, 0.04, 1.34, '#2a2a2f', 3.78, 0.25 + s * 0.48, 0.7);
   let z = 0.1;
   while (z < 1.25) {
     const t = 0.05 + ((s * 7 + z * 31) % 5) * 0.012;
@@ -325,6 +328,20 @@ collide(3.6, W, 0, 1.4);
 const barista = createBarista({ THREE, room, camera, canvas, kit: { box, cyl, mat, steam, canvasTexture }, onDone: cupReady });
 collide(...barista.collider);
 
+// walnut slat panel on the wall beside the bed
+for (let i = 0; i < 27; i++) box(0.035, H - 0.24, 0.05, '#6e4a32', -W + 0.02, H / 2 + 0.06, 0.72 + i * 0.085, room, { r: 0.008 });
+
+// sofa against the front wall
+const sofa = new THREE.Group();
+room.add(sofa);
+box(2.0, 0.3, 0.85, '#55585f', 1.1, 0.3, 2.5, sofa, { r: 0.09 });
+box(2.0, 0.55, 0.22, '#55585f', 1.1, 0.64, 2.86, sofa, { r: 0.09 });
+for (const x of [0.06, 2.14]) box(0.2, 0.42, 0.85, '#4a4d55', x, 0.48, 2.5, sofa, { r: 0.08 });
+box(0.46, 0.34, 0.14, '#d9a441', 0.55, 0.66, 2.66, sofa, { r: 0.065 }).rotation.x = 0.25;
+box(0.46, 0.34, 0.14, '#e8e6e2', 1.65, 0.66, 2.66, sofa, { r: 0.065 }).rotation.x = 0.25;
+for (const [x, z] of [[0.15, 2.15], [2.05, 2.15], [0.15, 2.85], [2.05, 2.85]]) cyl(0.022, 0.018, 0.14, '#0e0e10', x, 0.07, z, sofa);
+collide(-0.05, 2.25, 2.05, D);
+
 // poster
 const poster = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.75), new THREE.MeshStandardMaterial({
   roughness: 0.9,
@@ -337,22 +354,33 @@ const poster = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.75), new THREE.Mesh
     g.font = '20px Consolas, monospace'; g.fillText("git commit -m 'stay cozy'", w / 2, h - 28);
   }),
 }));
-poster.position.set(-W + 0.01, 1.75, -0.6);
+Object.assign(poster.material, DECAL);
+poster.position.set(-W + 0.012, 1.75, -0.6);
 poster.rotation.y = Math.PI / 2;
 room.add(poster);
 
-// string lights
-const bulbs = [];
-for (let i = 0; i < 17; i++) {
-  const t = i / 16;
-  const b = new THREE.Mesh(new THREE.SphereGeometry(0.035, 8, 8), new THREE.MeshBasicMaterial({ color: '#ffd28a' }));
-  b.position.set(-3.8 + t * 7.6, 2.82 - Math.sin(t * Math.PI * 4) ** 2 * 0.12, -D + 0.05);
-  room.add(b);
-  bulbs.push(b);
+// recessed ceiling downlights and a warm LED cove above the glass
+for (const [x, z] of [[-2.5, -1.3], [0, -1.3], [2.5, -1.3], [-2.5, 1.3], [0, 1.3], [2.5, 1.3]]) {
+  const spot = new THREE.Mesh(new THREE.CircleGeometry(0.085, 28), new THREE.MeshBasicMaterial({ color: '#ffe9c4' }));
+  spot.position.set(x, H - 0.004, z);
+  spot.rotation.x = Math.PI / 2;
+  room.add(spot);
 }
-const stringLight = new THREE.PointLight('#ffcf8f', 4, 8, 2);
-stringLight.position.set(0, 2.6, -2.3);
-room.add(stringLight);
+const cove = new THREE.Mesh(new THREE.BoxGeometry(W * 2 - 0.3, 0.03, 0.06), new THREE.MeshBasicMaterial({ color: '#ffcf8f' }));
+cove.position.set(0, H - 0.05, -D + 0.09);
+room.add(cove);
+const ceilingLight = new THREE.PointLight('#ffdcae', 6, 10, 2);
+ceilingLight.position.set(0, 2.75, 0.1);
+room.add(ceilingLight);
+
+// the rest of the floor: front door, corridor and co-working lounge
+const building = createBuilding({
+  THREE, room, kit: { box, slab, cyl, mat, add, canvasTexture, collide, interactive }, screenTexture: codeScreen,
+  getTicket: () => ide.view().ticket,
+  onSit: (desk) => sitAt(desk.x, desk.z, true),
+  onChat: () => { S.cozy = clamp(S.cozy + 4, 0, 100); },
+  toast,
+});
 
 // cat (its nose points along local +x)
 const cat = new THREE.Group();
@@ -728,7 +756,7 @@ rain.frustumCulled = false;
 outside.add(rain);
 
 // lights
-const hemi = new THREE.HemisphereLight('#ffffff', '#8a6a50', 1);
+const hemi = new THREE.HemisphereLight('#ffffff', '#a39a90', 1);
 scene.add(hemi);
 const sunLight = new THREE.DirectionalLight('#fff0d6', 3);
 sunLight.target.position.set(0, 1, 0);
@@ -778,7 +806,7 @@ function updateSky() {
   const evening = 0.35 + night * 0.65;
   lampLight.intensity = S.lampOn ? 12 * evening : 0;
   shade.material.emissiveIntensity = S.lampOn ? 0.9 : 0.05;
-  stringLight.intensity = 5 * evening;
+  ceilingLight.intensity = 9 * evening;
   rain.visible = S.raining;
 }
 
@@ -841,16 +869,29 @@ let arrived = true;
 const mouse = { x: 0, y: 0 };
 const POSES = {
   pc: { pos: new THREE.Vector3(DESK_X, 1.32, -1.7), look: new THREE.Vector3(DESK_X, 1.17, -2.8) },
-  window: { pos: new THREE.Vector3(winCx + 0.4, 1.55, -2.35), look: new THREE.Vector3(winCx, 3, -40) },
+  window: { pos: new THREE.Vector3(winCx, 1.55, -2.35), look: new THREE.Vector3(winCx, 3, -40) },
   sleep: { pos: new THREE.Vector3(-3.25, 0.9, 2.3), look: new THREE.Vector3(-2.2, 2.9, -1.5) },
   barista: { pos: new THREE.Vector3(2.72, 1.36, 2.24), look: new THREE.Vector3(3.75, 1.1, 2.24) },
 };
+// sit at a desk whose top is centred on (x, z); `friends` is true at the shared workstation
+let withFriends = false;
+function sitAt(x, z, friends) {
+  POSES.pc.pos.set(x, 1.32, z + 0.85);
+  POSES.pc.look.set(x, 1.17, z - 0.25);
+  withFriends = friends;
+  setMode('pc');
+}
 const poseCam = new THREE.PerspectiveCamera();
 const targetPos = new THREE.Vector3(), targetQuat = new THREE.Quaternion(), lookAt = new THREE.Vector3(), tmpV = new THREE.Vector3();
 const euler = new THREE.Euler(0, 0, 0, 'YXZ');
 
 function blocked(x, z, r = 0.28) {
-  if (x < -W + r || x > W - r || z < -D + r || z > D - r) return true;
+  // you can stand anywhere inside one of the building's walkable areas (a doorway only counts while its door is open)
+  const inside = building.zones.some((a) => {
+    const pad = a.pad ?? r;
+    return (!a.gate || a.gate()) && x > a.minX + pad && x < a.maxX - pad && z > a.minZ + pad && z < a.maxZ - pad;
+  });
+  if (!inside) return true;
   return colliders.some((c) => x > c.minX - r && x < c.maxX + r && z > c.minZ - r && z < c.maxZ + r);
 }
 
@@ -1087,9 +1128,10 @@ const ide = createIDE({
   onType() { S.energy = clamp(S.energy - 0.03, 0, 100); },
   onCommit(t) {
     const before = levelOf(S.xp);
-    const reward = Math.round(t.xp * (1 + S.cozy / 200) * (S.energy <= 1 ? 0.5 : 1));
+    const reward = Math.round(t.xp * (1 + S.cozy / 200) * (S.energy <= 1 ? 0.5 : 1) * (withFriends ? 1.2 : 1));
     S.xp += reward;
     S.commits++;
+    if (withFriends) toast('Maya and Devon cheer from the next desks. +20% XP for coding together.');
     toast(`✓ ${t.id} merged · +${reward} XP`);
     if (levelOf(S.xp) > before) toast(`★ Promoted to ${rankOf(S.xp)}!`);
     save();
@@ -1103,32 +1145,32 @@ function toggleRadio() {
 }
 const desktop = createDesktop({ S, onRadio: toggleRadio });
 
-// macOS-style wallpaper, menu bar, dock and one window; returns the window's content origin
+// macOS-style wallpaper, menu bar, dock and one window, sized to whichever display it is drawn on
 function macWindow(g, app, title, fill) {
-  const wall = g.createLinearGradient(0, 0, 640, 360);
+  const w = g.canvas.width, h = g.canvas.height;
+  const wall = g.createLinearGradient(0, 0, w, h);
   wall.addColorStop(0, '#2b1f5c'); wall.addColorStop(0.4, '#7a3b8f'); wall.addColorStop(0.7, '#e0637a'); wall.addColorStop(1, '#f6a75c');
-  g.fillStyle = wall; g.fillRect(0, 0, 640, 360);
-  g.fillStyle = 'rgba(30,20,50,0.45)'; g.fillRect(0, 0, 640, 15);
+  g.fillStyle = wall; g.fillRect(0, 0, w, h);
+  g.fillStyle = 'rgba(30,20,50,0.45)'; g.fillRect(0, 0, w, 15);
   g.fillStyle = '#ffffff'; g.font = 'bold 10px Segoe UI, sans-serif'; g.fillText(app, 22, 11);
-  g.font = '10px Segoe UI, sans-serif'; g.fillText('File   Edit   View   Window   Help', 60, 11);
+  g.font = '10px Segoe UI, sans-serif'; g.fillText('File   Edit   View   Window   Help', 30 + app.length * 6.5, 11);
   g.beginPath(); g.arc(11, 7.5, 3.5, 0, Math.PI * 2); g.fill();
-  g.fillStyle = 'rgba(255,255,255,0.25)'; g.beginPath(); g.roundRect(240, 328, 160, 26, 8); g.fill();
-  ['#0a66c2', '#f4f6fa', '#1bb83a', '#f9233f', '#fff3a3'].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.roundRect(250 + i * 29, 332, 22, 18, 5); g.fill(); });
-  g.fillStyle = fill; g.beginPath(); g.roundRect(14, 24, 612, 294, 7); g.fill();
-  g.fillStyle = 'rgba(255,255,255,0.08)'; g.beginPath(); g.roundRect(14, 24, 612, 20, [7, 7, 0, 0]); g.fill();
-  ['#ff5f57', '#febc2e', '#28c840'].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.arc(27 + i * 13, 34, 4, 0, Math.PI * 2); g.fill(); });
-  g.fillStyle = '#a0a0a0'; g.font = '11px Segoe UI, sans-serif'; g.textAlign = 'center'; g.fillText(title, 320, 38); g.textAlign = 'left';
+  g.fillStyle = 'rgba(255,255,255,0.25)'; g.beginPath(); g.roundRect(w / 2 - 80, h - 32, 160, 26, 8); g.fill();
+  ['#0a66c2', '#f4f6fa', '#1bb83a', '#f9233f', '#fff3a3'].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.roundRect(w / 2 - 70 + i * 29, h - 28, 22, 18, 5); g.fill(); });
+  g.fillStyle = fill; g.beginPath(); g.roundRect(12, 24, w - 24, h - 66, 7); g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.08)'; g.beginPath(); g.roundRect(12, 24, w - 24, 20, [7, 7, 0, 0]); g.fill();
+  ['#ff5f57', '#febc2e', '#28c840'].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.arc(25 + i * 13, 34, 4, 0, Math.PI * 2); g.fill(); });
+  g.fillStyle = '#a0a0a0'; g.font = '11px Segoe UI, sans-serif'; g.textAlign = 'center'; g.fillText(title, w / 2, 38); g.textAlign = 'left';
 }
 
 function drawScreens() {
   const { ticket, code, lastRun } = ide.view();
-  const MONO = '14px Consolas, monospace';
 
-  // left display: the editor
+  // main display (landscape): the editor
   let g = codeScreen.image.getContext('2d');
   macWindow(g, 'Code', `solution.py — ${ticket.id}`, '#1e1e1e');
-  g.fillStyle = '#007acc'; g.fillRect(14, 306, 612, 12);
-  g.font = MONO;
+  g.fillStyle = '#007acc'; g.fillRect(12, 306, 616, 12);
+  g.font = '14px Consolas, monospace';
   code.trimEnd().split('\n').slice(0, 14).forEach((line, i) => {
     g.fillStyle = '#858585'; g.fillText(String(i + 1).padStart(2), 22, 64 + i * 17);
     g.fillStyle = line.trimStart().startsWith('#') ? '#6a9955' : /^\s*(def|class)\b/.test(line) ? '#dcdcaa' : '#d4d4d4';
@@ -1136,16 +1178,23 @@ function drawScreens() {
   });
   codeScreen.needsUpdate = true;
 
-  // right display: a terminal
+  // second display (portrait): a tall terminal
   g = termScreen.image.getContext('2d');
   macWindow(g, 'Terminal', 'cozy-app — zsh', '#151517');
-  g.font = MONO;
-  const rows = [['#cccccc', `% git switch ${ticket.id.toLowerCase()}`], ['#cccccc', '% python -m pytest -q']];
+  g.font = '12px Consolas, monospace';
+  const rows = [['#cccccc', `% git switch ${ticket.id.toLowerCase()}`], ['#7f7f7f', `Switched to branch '${ticket.id.toLowerCase()}'`], ['', ''],
+    ['#cccccc', '% python -m pytest -q']];
   if (!lastRun) rows.push(['#7f7f7f', 'waiting for a test run ...']);
   else if (lastRun.error) rows.push(['#f14c4c', 'error while loading solution.py']);
   else rows.push([lastRun.ok ? '#23d18b' : '#f14c4c', `${lastRun.passed} passed, ${lastRun.total - lastRun.passed} failed`]);
-  rows.push(['#cccccc', ''], ['#cccccc', '% git log --oneline | wc -l'], ['#3b8eea', String(S.commits)], ['#cccccc', '% _']);
-  rows.forEach(([color, text], i) => { g.fillStyle = color; g.fillText(text, 26, 68 + i * 21); });
+  rows.push(['', ''], ['#cccccc', '% git log --oneline']);
+  for (let i = S.ticket - 1; i >= Math.max(0, S.ticket - 12); i--) {
+    const done = tickets[i % tickets.length];
+    rows.push(['#3b8eea', `${(0x9e3779b1 * (i + 7) >>> 8).toString(16).slice(0, 7)} ${done.id} ${done.title}`.slice(0, 46)]);
+  }
+  if (S.ticket === 0) rows.push(['#7f7f7f', '(no commits yet)']);
+  rows.push(['', ''], ['#cccccc', `% uptime`], ['#7f7f7f', `day ${S.day}, ${S.commits} commit${S.commits === 1 ? '' : 's'} shipped`], ['', ''], ['#cccccc', '% _']);
+  rows.slice(0, 28).forEach(([color, text], i) => { g.fillStyle = color || '#cccccc'; g.fillText(text, 22, 64 + i * 18); });
   termScreen.needsUpdate = true;
 }
 
@@ -1153,8 +1202,8 @@ function drawScreens() {
 interactive(bed, 'bed', () => (S.hour >= 9 && S.hour < 18 ? 'Take a nap' : 'Go to bed'), sleep);
 interactive(glass, 'window', 'Gaze out the window', () => setMode('window'));
 interactive(bench, 'window', 'Gaze out the window', () => setMode('window'));
-interactive(desk, 'pc', 'Sit down and code', () => setMode('pc'));
-interactive(chair, 'pc', 'Sit down and code', () => setMode('pc'));
+interactive(desk, 'pc', 'Sit down and code', () => sitAt(DESK_X, -2.55, false));
+interactive(chair, 'pc', 'Sit down and code', () => sitAt(DESK_X, -2.55, false));
 interactive(lamp, 'lamp', () => (S.lampOn ? 'Turn lamp off' : 'Turn lamp on'), () => { S.lampOn = !S.lampOn; });
 interactive(radio, 'radio', () => (S.radioOn ? 'Turn radio off' : 'Play lo-fi radio'), toggleRadio);
 interactive(barista.group, 'coffee', () => (S.cup ? 'Finish your cup first (Q to sip)' : 'Brew a coffee'), () => {
@@ -1238,9 +1287,10 @@ function updateHUD() {
 let lastFrame = performance.now(), elapsed = 0;
 let hudTimer = 0, focusTimer = 0;
 
-// Once a second, trade resolution for frame rate: drop quality quickly when frames run slow,
-// and creep back up only after several steady seconds.
-const perf = { frames: 0, time: 0, steady: 0 };
+// Trade resolution for frame rate, but rarely, because every change is visible as a brief shimmer:
+// step down only after three slow seconds in a row (a one-off hitch such as Python loading is ignored),
+// step back up only after fifteen smooth ones, and never climb back to a setting that already proved too heavy.
+const perf = { frames: 0, time: 0, slow: 0, steady: 0, raised: false, ceiling: QUALITY_MAX };
 function tunePerformance(frameSeconds) {
   if (frameSeconds > 0.5) { perf.frames = perf.time = 0; return; } // the window was hidden or stalled
   perf.frames++;
@@ -1248,12 +1298,20 @@ function tunePerformance(frameSeconds) {
   if (perf.time < 1) return;
   const fps = perf.frames / perf.time;
   perf.frames = perf.time = 0;
-  if (fps < 52 && quality > QUALITY_MIN) {
-    quality = Math.max(QUALITY_MIN, quality * 0.85);
+  if (fps < 50) {
     perf.steady = 0;
-    applyQuality();
-  } else if (fps >= 58 && ++perf.steady >= 6 && quality < QUALITY_MAX) {
-    quality = Math.min(QUALITY_MAX, quality * 1.08);
+    if (++perf.slow >= 3 && quality > QUALITY_MIN) {
+      if (perf.raised) perf.ceiling = quality * 0.99;
+      quality = Math.max(QUALITY_MIN, quality * 0.85);
+      perf.slow = 0;
+      applyQuality();
+    }
+    return;
+  }
+  perf.slow = 0;
+  if (fps >= 58 && ++perf.steady >= 15 && quality * 1.08 <= perf.ceiling) {
+    quality *= 1.08;
+    perf.raised = true;
     perf.steady = 0;
     applyQuality();
   }
@@ -1272,7 +1330,7 @@ function tick() {
     S.hour += dt / 60;
     if (S.hour >= 24) { S.hour -= 24; newDay(); }
     S.energy = clamp(S.energy - dt * 0.1, 0, 100);
-    const gain = mode === 'window' ? 2 : -0.04 + (S.radioOn ? 0.03 : 0) + (S.raining ? 0.02 : 0);
+    const gain = mode === 'window' ? 2 : -0.04 + (S.radioOn ? 0.03 : 0) + (S.raining ? 0.02 : 0) + (building.inLounge(player.pos) ? 0.3 : 0);
     S.cozy = clamp(S.cozy + dt * gain, 0, 100);
   }
 
@@ -1281,13 +1339,12 @@ function tick() {
   updateCat(dt, t);
   updateMetro(dt, t);
   updateCoffee(dt, t);
+  building.update(dt, t, { player: player.pos, hour: S.hour, camera, hideBubbles: mode !== 'walk' });
   focusTimer -= dt;
   if (focusTimer <= 0) { focusKey = findFocus(); focusTimer = 0.08; }
 
   // little bits of life
-  bulbs.forEach((b, i) => b.material.color.setHSL(0.1, 0.9, 0.62 + Math.sin(t * 1.5 + i) * 0.08));
   radioLed.material.emissiveIntensity = S.radioOn ? 2 : 0;
-  monitorGlow.intensity = 1.6 + Math.sin(t * 3) * 0.15;
   for (const c of clouds) {
     c.position.x += c.userData.speed * dt;
     if (c.position.x > 230) c.position.x = -230;
@@ -1319,6 +1376,9 @@ tick();
 window.__cozy = {
   S, ide, barista, desktop, leave, catGo,
   quality: () => quality,
+  goto(x, z) { player.pos.x = x; player.pos.z = z; },
+  openDoor(open = true) { building.door.open = building.loungeDoor.open = open; },
+  probe: (points) => points.map(([x, z]) => (blocked(x, z) ? 'X' : 'ok')).join(' '),
   gaze(x, y) { mouse.x = x; mouse.y = y; },
   trainAt(x) { trainState.x = x; trainState.wait = 0; },
   look(yaw, pitch) { player.yaw = yaw; player.pitch = pitch; },
