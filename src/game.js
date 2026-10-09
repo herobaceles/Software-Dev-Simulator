@@ -1,6 +1,8 @@
-import * as THREE from '../node_modules/three/build/three.module.js';
+import * as THREE from 'three';
+import { RoundedBoxGeometry } from 'three/addons/geometries/RoundedBoxGeometry.js';
 import { ranks } from './tickets.js';
 import { createIDE } from './ide.js';
+import { createDesktop } from './desktop.js';
 import { createBarista } from './barista.js';
 
 const $ = (id) => document.getElementById(id);
@@ -31,12 +33,15 @@ const rankOf = (xp) => ranks[Math.min(levelOf(xp), ranks.length - 1)];
 
 // ───────────────────────── renderer ─────────────────────────
 const canvas = $('view');
-const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-renderer.shadowMap.enabled = true;
-renderer.shadowMap.type = THREE.PCFShadowMap;
+const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, powerPreference: 'high-performance' });
+// MSAA from `antialias`, plus supersampling when the GPU has room for it. `quality` multiplies the
+// display's pixel ratio and is tuned at runtime (see tunePerformance) so the frame rate stays smooth.
+const QUALITY_MIN = 0.7, QUALITY_MAX = 1.25;
+let quality = 1;
+const applyQuality = () => renderer.setPixelRatio(Math.min(devicePixelRatio * quality, 3));
+applyQuality();
 renderer.toneMapping = THREE.ACESFilmicToneMapping;
-renderer.toneMappingExposure = 1.15;
+renderer.toneMappingExposure = 0.82;
 
 const scene = new THREE.Scene();
 scene.background = new THREE.Color('#8ec9f5');
@@ -65,15 +70,20 @@ function mat(color, opts = {}) {
 function add(geo, material, x, y, z, parent = room) {
   const m = new THREE.Mesh(geo, material);
   m.position.set(x, y, z);
-  m.castShadow = m.receiveShadow = true;
   parent.add(m);
   return m;
 }
-function box(w, h, d, color, x, y, z, parent = room, opts = {}) {
-  return add(new THREE.BoxGeometry(w, h, d), mat(color, opts), x, y, z, parent);
+// furniture: a box with softened edges (pass `r` to override the corner radius)
+function box(w, h, d, color, x, y, z, parent = room, { r, ...opts } = {}) {
+  const radius = r ?? Math.min(0.03, Math.min(w, h, d) * 0.4);
+  return add(new RoundedBoxGeometry(w, h, d, 4, radius), mat(color, opts), x, y, z, parent);
+}
+// architecture: a plain sharp box
+function slab(w, h, d, color, x, y, z) {
+  return add(new THREE.BoxGeometry(w, h, d), mat(color), x, y, z);
 }
 function cyl(rTop, rBottom, h, color, x, y, z, parent = room, opts = {}) {
-  return add(new THREE.CylinderGeometry(rTop, rBottom, h, 18), mat(color, opts), x, y, z, parent);
+  return add(new THREE.CylinderGeometry(rTop, rBottom, h, 36), mat(color, opts), x, y, z, parent);
 }
 function collide(minX, maxX, minZ, maxZ) { colliders.push({ minX, maxX, minZ, maxZ }); }
 function interactive(obj, key, label, action) {
@@ -87,13 +97,14 @@ function canvasTexture(w, h, draw) {
   if (draw) draw(c.getContext('2d'), w, h);
   const t = new THREE.CanvasTexture(c);
   t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
   return t;
 }
 // a few soft puffs that rise and fade; returns an update(t, on) function
 function steam(parent, x, y, z, count = 4, size = 0.02, alpha = 0.3) {
   const puffs = [];
   for (let i = 0; i < count; i++) {
-    const p = new THREE.Mesh(new THREE.SphereGeometry(size, 8, 8), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, depthWrite: false }));
+    const p = new THREE.Mesh(new THREE.SphereGeometry(size, 14, 12), new THREE.MeshBasicMaterial({ color: '#ffffff', transparent: true, opacity: 0, depthWrite: false }));
     parent.add(p);
     puffs.push(p);
   }
@@ -129,15 +140,15 @@ const floor = add(new THREE.PlaneGeometry(W * 2, D * 2), mat('#ffffff', { map: f
 floor.rotation.x = -Math.PI / 2;
 
 // walls + ceiling
-box(W * 2 + 0.4, 0.2, D * 2 + 0.4, '#f3e6d2', 0, H + 0.1, 0);
-box(0.2, H, D * 2, wallColor, -W - 0.1, H / 2, 0);
-box(0.2, H, D * 2, wallColor, W + 0.1, H / 2, 0);
-box(W * 2 + 0.4, H, 0.2, wallColor, 0, H / 2, D + 0.1);
+slab(W * 2 + 0.4, 0.2, D * 2 + 0.4, '#f3e6d2', 0, H + 0.1, 0);
+slab(0.2, H, D * 2, wallColor, -W - 0.1, H / 2, 0);
+slab(0.2, H, D * 2, wallColor, W + 0.1, H / 2, 0);
+slab(W * 2 + 0.4, H, 0.2, wallColor, 0, H / 2, D + 0.1);
 // back wall with window opening
-box(WIN.x0 + W, H, 0.2, wallColor, (-W + WIN.x0) / 2, H / 2, -D - 0.1);
-box(W - WIN.x1, H, 0.2, wallColor, (W + WIN.x1) / 2, H / 2, -D - 0.1);
-box(WIN.x1 - WIN.x0, WIN.y0, 0.2, wallColor, (WIN.x0 + WIN.x1) / 2, WIN.y0 / 2, -D - 0.1);
-box(WIN.x1 - WIN.x0, H - WIN.y1, 0.2, wallColor, (WIN.x0 + WIN.x1) / 2, (H + WIN.y1) / 2, -D - 0.1);
+slab(WIN.x0 + W, H, 0.2, wallColor, (-W + WIN.x0) / 2, H / 2, -D - 0.1);
+slab(W - WIN.x1, H, 0.2, wallColor, (W + WIN.x1) / 2, H / 2, -D - 0.1);
+slab(WIN.x1 - WIN.x0, WIN.y0, 0.2, wallColor, (WIN.x0 + WIN.x1) / 2, WIN.y0 / 2, -D - 0.1);
+slab(WIN.x1 - WIN.x0, H - WIN.y1, 0.2, wallColor, (WIN.x0 + WIN.x1) / 2, (H + WIN.y1) / 2, -D - 0.1);
 // baseboards
 for (const [w, d, x, z] of [[W * 2, 0.04, 0, D - 0.02], [W * 2, 0.04, 0, -D + 0.02], [0.04, D * 2, -W + 0.02, 0], [0.04, D * 2, W - 0.02, 0]]) {
   box(w, 0.12, d, '#6b4630', x, 0.06, z);
@@ -165,9 +176,9 @@ box(winW + 1.1, 0.05, 0.05, frameColor, winCx, WIN.y1 + 0.32, -D + 0.07);
 const bench = new THREE.Group();
 room.add(bench);
 box(winW - 0.2, 0.38, 0.5, '#7a5238', winCx, 0.19, -D + 0.27, bench);
-box(winW - 0.3, 0.1, 0.46, '#d98f7a', winCx, 0.43, -D + 0.27, bench);
-box(0.4, 0.3, 0.12, '#f2c57c', WIN.x0 + 0.4, 0.62, -D + 0.12, bench).rotation.x = -0.25;
-box(0.4, 0.3, 0.12, '#8fb8a8', WIN.x1 - 0.45, 0.62, -D + 0.12, bench).rotation.x = -0.25;
+box(winW - 0.3, 0.12, 0.46, '#d98f7a', winCx, 0.43, -D + 0.27, bench, { r: 0.055 });
+box(0.4, 0.3, 0.14, '#f2c57c', WIN.x0 + 0.4, 0.62, -D + 0.12, bench, { r: 0.065 }).rotation.x = -0.25;
+box(0.4, 0.3, 0.14, '#8fb8a8', WIN.x1 - 0.45, 0.62, -D + 0.12, bench, { r: 0.065 }).rotation.x = -0.25;
 collide(WIN.x0, WIN.x1, -D, -D + 0.55);
 
 // rug
@@ -180,10 +191,10 @@ rugIn.rotation.x = -Math.PI / 2;
 const bed = new THREE.Group();
 room.add(bed);
 box(1.45, 0.3, 2.2, '#6b4630', -3.25, 0.15, 1.8, bed);
-box(1.35, 0.2, 2.1, '#fbf3e6', -3.25, 0.4, 1.8, bed);
-box(1.42, 0.14, 1.4, '#7f9fc4', -3.25, 0.5, 1.42, bed);
-box(1.42, 0.06, 0.25, '#f6e7d0', -3.25, 0.55, 2.1, bed);
-box(0.8, 0.14, 0.42, '#ffffff', -3.25, 0.57, 2.55, bed).rotation.x = 0.12;
+box(1.35, 0.22, 2.1, '#fbf3e6', -3.25, 0.4, 1.8, bed, { r: 0.08 });
+box(1.44, 0.16, 1.4, '#7f9fc4', -3.25, 0.5, 1.42, bed, { r: 0.07 });
+box(1.44, 0.08, 0.25, '#f6e7d0', -3.25, 0.55, 2.1, bed, { r: 0.035 });
+box(0.8, 0.16, 0.42, '#ffffff', -3.25, 0.58, 2.55, bed, { r: 0.075 }).rotation.x = 0.12;
 box(1.45, 0.95, 0.1, '#6b4630', -3.25, 0.475, 2.93, bed);
 collide(-W, -2.52, 0.68, D);
 // nightstand + clock
@@ -198,26 +209,31 @@ room.add(desk);
 box(2.0, 0.06, 0.8, '#b98558', 2.5, 0.75, -2.55, desk);
 for (const [x, z] of [[1.58, -2.87], [3.42, -2.87], [1.58, -2.23], [3.42, -2.23]]) box(0.07, 0.72, 0.07, '#5a3a28', x, 0.36, z, desk);
 
+const ALU = '#d3d5d9', SATIN = { metalness: 0.3, roughness: 0.4 };
 function monitor(x, turn) {
   const g = new THREE.Group();
   g.position.set(x, 0, -2.76);
   g.rotation.y = turn;
   desk.add(g);
-  box(0.24, 0.02, 0.16, '#1b1b20', 0, 0.79, 0, g);
-  box(0.04, 0.2, 0.03, '#1b1b20', 0, 0.89, -0.01, g);
-  box(0.84, 0.5, 0.035, '#1b1b20', 0, 1.2, 0, g);
+  // aluminium display on an L-shaped stand
+  box(0.22, 0.012, 0.17, ALU, 0, 0.787, 0.01, g, SATIN);
+  box(0.13, 0.22, 0.014, ALU, 0, 0.89, -0.04, g, SATIN);
+  box(0.84, 0.5, 0.026, ALU, 0, 1.2, -0.003, g, { ...SATIN, r: 0.012 });
+  box(0.826, 0.486, 0.01, '#050506', 0, 1.2, 0.009, g, { r: 0.004 });
   const tex = canvasTexture(640, 360);
   const face = new THREE.Mesh(new THREE.PlaneGeometry(0.8, 0.45), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
-  face.position.set(0, 1.2, 0.019);
+  face.position.set(0, 1.2, 0.0145);
   g.add(face);
   return tex;
 }
 const codeScreen = monitor(DESK_X - 0.43, 0.2);
 const termScreen = monitor(DESK_X + 0.43, -0.2);
-box(0.5, 0.025, 0.17, '#2a2a31', DESK_X, 0.795, -2.38, desk);
-for (let i = 0; i < 3; i++) box(0.44, 0.006, 0.035, ['#ff5d8f', '#7CFFB2', '#6cc7ff'][i], DESK_X, 0.81, -2.43 + i * 0.05, desk, { emissive: ['#ff5d8f', '#7CFFB2', '#6cc7ff'][i], emissiveIntensity: 0.5 });
-box(0.9, 0.006, 0.34, '#25252c', DESK_X + 0.1, 0.784, -2.36, desk);
-box(0.07, 0.03, 0.11, '#2a2a31', DESK_X + 0.42, 0.8, -2.36, desk);
+// Mac mini, keyboard and trackpad
+box(0.2, 0.045, 0.2, ALU, 3.3, 0.803, -2.42, desk, { ...SATIN, r: 0.02 });
+box(0.9, 0.006, 0.34, '#3a3540', DESK_X - 0.05, 0.784, -2.36, desk, { r: 0.003 });
+box(0.44, 0.014, 0.13, ALU, DESK_X - 0.12, 0.794, -2.37, desk, { ...SATIN, r: 0.006 });
+box(0.41, 0.004, 0.1, '#f7f7f8', DESK_X - 0.12, 0.802, -2.37, desk, { r: 0.002 });
+box(0.15, 0.01, 0.12, '#f1f1f3', DESK_X + 0.22, 0.792, -2.37, desk, { r: 0.005 });
 box(0.28, 0.02, 0.2, '#f2c57c', 1.82, 0.79, -2.3, desk).rotation.y = 0.2;
 const monitorGlow = new THREE.PointLight('#9fc4ff', 1.8, 4, 2);
 monitorGlow.position.set(DESK_X, 1.2, -2.35);
@@ -286,7 +302,7 @@ const plant = new THREE.Group();
 room.add(plant);
 cyl(0.17, 0.13, 0.3, '#d98f7a', 1.2, 0.15, -2.65, plant);
 for (const [x, y, z, s] of [[0, 0.55, 0, 0.26], [0.14, 0.75, 0.05, 0.2], [-0.13, 0.72, -0.04, 0.2], [0.02, 0.95, 0.02, 0.17]]) {
-  add(new THREE.IcosahedronGeometry(s, 0), mat('#5d9c6b', { flatShading: true }), 1.2 + x, y, -2.65 + z, plant);
+  add(new THREE.SphereGeometry(s, 20, 16), mat(y > 0.8 ? '#6aab78' : '#5d9c6b'), 1.2 + x, y, -2.65 + z, plant).scale.y = 0.9;
 }
 collide(1.0, 1.4, -2.85, -2.45);
 
@@ -299,43 +315,15 @@ for (let s = 0; s < 4; s++) {
   while (z < 1.25) {
     const t = 0.05 + ((s * 7 + z * 31) % 5) * 0.012;
     const h = 0.26 + ((s * 3 + z * 17) % 4) * 0.035;
-    box(0.2, h, t, bookColors[Math.floor(s * 2 + z * 13) % bookColors.length], 3.68, 0.27 + s * 0.48 + h / 2, z + t / 2);
+    box(0.2, h, t, bookColors[Math.floor(s * 2 + z * 13) % bookColors.length], 3.68, 0.27 + s * 0.48 + h / 2, z + t / 2, room, { r: 0.006 });
     z += t + 0.012;
   }
 }
 collide(3.6, W, 0, 1.4);
 
-// espresso bar (the machine faces into the room, toward -x)
-const coffee = new THREE.Group();
-room.add(coffee);
-const BAR = { x: 3.6, z: 2.52 }; // where the cup sits under the group head
-box(0.6, 0.9, 0.9, '#8a5a3c', 3.7, 0.45, 2.45, coffee);
-box(0.64, 0.04, 0.94, '#f3e6d2', 3.7, 0.92, 2.45, coffee);
-box(0.32, 0.36, 0.44, '#c9ccd1', 3.8, 1.14, BAR.z, coffee, METAL);
-box(0.36, 0.05, 0.48, '#2b2b33', 3.8, 1.345, BAR.z, coffee);
-box(0.12, 0.07, 0.16, '#8f9399', BAR.x, 1.21, BAR.z, coffee, METAL);
-const portafilter = new THREE.Group();
-portafilter.position.set(BAR.x, 1.155, BAR.z);
-coffee.add(portafilter);
-cyl(0.042, 0.036, 0.035, '#55555f', 0, 0, 0, portafilter, METAL);
-box(0.16, 0.026, 0.026, '#18181d', -0.11, 0, 0, portafilter);
-box(0.2, 0.03, 0.4, '#2b2b33', BAR.x, 0.955, BAR.z, coffee);
-box(0.03, 0.03, 0.03, '#222', 3.635, 1.28, BAR.z - 0.15, coffee, { emissive: '#ff5a4f', emissiveIntensity: 2 });
-const barCup = cyl(0.042, 0.032, 0.07, '#fbf3e6', BAR.x, 1.005, BAR.z, coffee);
-const barCupFill = cyl(0.037, 0.037, 0.004, '#3b2314', BAR.x, 1.02, BAR.z, coffee);
-const stream = cyl(0.005, 0.005, 0.1, '#4a2c17', BAR.x, 1.085, BAR.z, coffee);
-stream.castShadow = false;
-const wand = cyl(0.008, 0.008, 0.2, '#c9ccd1', BAR.x + 0.02, 1.1, BAR.z + 0.2, coffee, METAL);
-wand.rotation.z = -0.5;
-const jug = cyl(0.045, 0.04, 0.1, '#c9ccd1', BAR.x - 0.04, 1.02, BAR.z + 0.2, coffee, METAL);
-const grinder = new THREE.Group();
-grinder.position.set(3.78, 0.94, 2.14);
-coffee.add(grinder);
-box(0.16, 0.3, 0.18, '#2b2b33', 0, 0.15, 0, grinder);
-cyl(0.08, 0.05, 0.14, '#6b4630', 0, 0.37, 0, grinder, { transparent: true, opacity: 0.75 });
-box(0.06, 0.03, 0.1, '#8f9399', -0.1, 0.12, 0, grinder, METAL);
-const machineSteam = steam(coffee, BAR.x - 0.04, 1.08, BAR.z + 0.2, 5, 0.022);
-collide(3.4, W, 2.0, D);
+// espresso bar (built and run by barista.js; the machine faces into the room, toward -x)
+const barista = createBarista({ THREE, room, camera, canvas, kit: { box, cyl, mat, steam, canvasTexture }, onDone: cupReady });
+collide(...barista.collider);
 
 // poster
 const poster = new THREE.Mesh(new THREE.PlaneGeometry(1.1, 0.75), new THREE.MeshStandardMaterial({
@@ -383,12 +371,13 @@ for (const dz of [-0.045, 0.045]) add(new THREE.SphereGeometry(0.016, 8, 8), mat
 const tail = new THREE.Group();
 tail.position.set(-0.27, 0.16, 0);
 catBodyGroup.add(tail);
-box(0.26, 0.05, 0.05, '#c9833f', -0.12, 0.02, 0, tail).rotation.z = -0.5;
+const tailFur = add(new THREE.CapsuleGeometry(0.026, 0.22, 6, 14), furDark, -0.12, 0.02, 0, tail);
+tailFur.rotation.z = Math.PI / 2 - 0.5;
 const catLegs = [[0.17, 0.07], [0.17, -0.07], [-0.17, 0.07], [-0.17, -0.07]].map(([x, z]) => {
   const leg = new THREE.Group();
   leg.position.set(x, 0.14, z);
   cat.add(leg);
-  box(0.05, 0.15, 0.05, '#c9833f', 0, -0.07, 0, leg);
+  add(new THREE.CapsuleGeometry(0.026, 0.1, 6, 12), furDark, 0, -0.07, 0, leg);
   return leg;
 });
 
@@ -399,7 +388,7 @@ cyl(0.045, 0.036, 0.085, '#fbf3e6', 0, 0, 0, hand);
 const handle = add(new THREE.TorusGeometry(0.026, 0.008, 6, 14), mat('#fbf3e6'), 0.05, 0, 0, hand);
 handle.castShadow = false;
 const handFill = cyl(0.04, 0.04, 0.004, '#3b2314', 0, 0.038, 0, hand);
-const handSteam = steam(hand, 0, 0.05, 0, 3, 0.008, 0.14);
+const handSteam = steam(hand, 0, 0.05, 0, 3, 0.005, 0.08);
 hand.traverse((o) => { o.castShadow = false; });
 const HAND_REST = new THREE.Vector3(0.3, -0.27, -0.52), HAND_SIP = new THREE.Vector3(0.06, -0.13, -0.3);
 let sipAnim = 0;
@@ -501,11 +490,6 @@ outside.add(rain);
 const hemi = new THREE.HemisphereLight('#ffffff', '#8a6a50', 1);
 scene.add(hemi);
 const sunLight = new THREE.DirectionalLight('#fff0d6', 3);
-sunLight.castShadow = true;
-sunLight.shadow.mapSize.set(2048, 2048);
-Object.assign(sunLight.shadow.camera, { left: -8, right: 8, top: 8, bottom: -8, near: 1, far: 90 });
-sunLight.shadow.bias = -0.0005;
-sunLight.shadow.normalBias = 0.03;
 sunLight.target.position.set(0, 1, 0);
 scene.add(sunLight, sunLight.target);
 // soft fill so the skyline isn't a wall of silhouettes when the sun is behind it
@@ -539,20 +523,20 @@ function updateSky() {
   cloudMat.color.setScalar(0.18 + day * 0.82).lerp(skyColor, 0.25);
   cloudMat.opacity = S.raining ? 0.95 : 0.8;
   buildings.material.color.setScalar(0.3 + day * 0.7);
-  fill.intensity = 0.15 + day * 1.3 * (S.raining ? 0.6 : 1);
+  fill.intensity = 0.1 + day * 0.8 * (S.raining ? 0.6 : 1);
   ground.material.color.set('#4c6b55').multiplyScalar(0.3 + day * 0.7);
 
   const src = Math.sin(a) > -0.05 ? sun.position : moon.position;
   sunLight.position.copy(src).normalize().multiplyScalar(40).add(sunLight.target.position);
   const wet = S.raining ? 0.35 : 1;
-  sunLight.intensity = (0.25 + day * 3.2) * wet;
+  sunLight.intensity = (0.15 + day * 1.5) * wet;
   sunLight.color.set(day > 0.5 ? '#fff0d6' : '#9fb4ff').lerp(tmpColor.set('#ffb07a'), day * (1 - day) * 2.4);
-  hemi.intensity = 0.3 + day * 1.5 * (S.raining ? 0.7 : 1);
+  hemi.intensity = 0.3 + day * 1.0 * (S.raining ? 0.7 : 1);
   hemi.color.copy(skyColor).lerp(tmpColor.set('#ffffff'), 0.4);
 
   const evening = 0.35 + night * 0.65;
-  lampLight.intensity = S.lampOn ? 16 * evening : 0;
-  shade.material.emissiveIntensity = S.lampOn ? 1.4 : 0.05;
+  lampLight.intensity = S.lampOn ? 12 * evening : 0;
+  shade.material.emissiveIntensity = S.lampOn ? 0.9 : 0.05;
   stringLight.intensity = 5 * evening;
   rain.visible = S.raining;
 }
@@ -561,7 +545,7 @@ function updateSky() {
 let actx = null, rainGain = null, musicGain = null, fxGain = null, fxFilter = null, chordStep = 0, nextChordAt = 0;
 const CHORDS = [[174.6, 220, 261.6, 329.6], [164.8, 196, 246.9, 293.7], [146.8, 174.6, 220, 261.6], [130.8, 164.8, 196, 246.9]];
 // machine noises per barista step: [filter type, frequency, volume]
-const FX = { grind: ['bandpass', 700, 0.35], pull: ['lowpass', 320, 0.12], steam: ['highpass', 3800, 0.1] };
+const FX = { grind: ['bandpass', 700, 0.35], pull: ['lowpass', 320, 0.12], steam: ['highpass', 3800, 0.1], water: ['bandpass', 1800, 0.06] };
 
 function initAudio() {
   if (actx) return;
@@ -596,7 +580,7 @@ function updateAudio() {
   if (!actx) return;
   const target = S.raining ? (mode === 'window' ? 0.16 : 0.08) : 0;
   rainGain.gain.value += (target - rainGain.gain.value) * 0.05;
-  const fx = barista.state.holding ? FX[barista.state.step] : null;
+  const fx = FX[barista.state.sound];
   if (fx) { fxFilter.type = fx[0]; fxFilter.frequency.value = fx[1]; }
   fxGain.gain.value += ((fx ? fx[2] : 0) - fxGain.gain.value) * 0.2;
   if (S.radioOn && actx.currentTime > nextChordAt - 0.2) {
@@ -618,7 +602,7 @@ const POSES = {
   pc: { pos: new THREE.Vector3(DESK_X, 1.32, -1.7), look: new THREE.Vector3(DESK_X, 1.17, -2.8) },
   window: { pos: new THREE.Vector3(winCx, 1.55, -2.35), look: new THREE.Vector3(winCx, 3, -40) },
   sleep: { pos: new THREE.Vector3(-3.25, 0.9, 2.3), look: new THREE.Vector3(-2.2, 2.9, -1.5) },
-  barista: { pos: new THREE.Vector3(2.92, 1.3, 2.42), look: new THREE.Vector3(3.75, 1.07, 2.45) },
+  barista: { pos: new THREE.Vector3(2.72, 1.36, 2.24), look: new THREE.Vector3(3.75, 1.1, 2.24) },
 };
 const poseCam = new THREE.PerspectiveCamera();
 const targetPos = new THREE.Vector3(), targetQuat = new THREE.Quaternion(), lookAt = new THREE.Vector3(), tmpV = new THREE.Vector3();
@@ -743,7 +727,7 @@ function setMode(next) {
   mode = next;
   arrived = false;
   if (next !== 'walk' && document.pointerLockElement) document.exitPointerLock();
-  $('ide').classList.toggle('on', next === 'pc');
+  if (next === 'pc') desktop.show(); else desktop.hide();
   document.body.classList.toggle('at-pc', next === 'pc');
   $('caption').classList.toggle('on', next === 'window');
   $('crosshair').style.display = next === 'walk' ? '' : 'none';
@@ -754,6 +738,7 @@ function setMode(next) {
     ide.blur();
   }
   if (next !== 'barista' && barista.state.open) barista.close();
+  $('hud').style.opacity = next === 'barista' ? 0.35 : '';
   if (next === 'window') $('caption').textContent = windowCaption();
   refreshHint();
 }
@@ -813,16 +798,14 @@ function toast(text) {
 }
 
 // ───────────────────────── coffee ─────────────────────────
-const barista = createBarista({
-  onDone({ drink, quality, stars, decaf }) {
-    const strength = 0.5 + quality;
-    S.cup = { name: (decaf ? 'Decaf ' : '') + drink.name, stars, sips: drink.sips, energy: decaf ? 0 : drink.energy * strength, cozy: drink.cozy * strength, milk: drink.milk };
-    S.coffee++;
-    toast(`☕ ${S.cup.name} ${'★'.repeat(stars)} — press Q to sip`);
-    save();
-    setMode('walk');
-  },
-});
+function cupReady({ name, quality, stars, sips, energy, cozy, milk, note, decaf }) {
+  const strength = 0.5 + quality;
+  S.cup = { name: (decaf ? 'Decaf ' : '') + name, stars, sips, energy: decaf ? 0 : energy * strength, cozy: cozy * strength, milk };
+  S.coffee++;
+  toast(`☕ ${S.cup.name} ${'★'.repeat(stars)} — ${note}. Press Q to sip.`);
+  save();
+  setMode('walk');
+}
 
 function sip() {
   if (!S.cup || sipAnim > 0 || (mode !== 'walk' && mode !== 'window')) return;
@@ -836,19 +819,7 @@ function sip() {
 }
 
 function updateCoffee(dt, t) {
-  barista.update(dt);
-  const b = barista.state, brewing = mode === 'barista' && b.drink;
-  grinder.position.x = 3.78 + (b.step === 'grind' && b.holding ? Math.sin(t * 90) * 0.004 : 0);
-  stream.visible = b.step === 'pull' && b.holding;
-  const poured = brewing && (b.step === 'pull' ? b.value / 100 : ['steam', 'done'].includes(b.step) ? 1 : 0);
-  barCup.visible = !S.cup;
-  barCupFill.visible = !S.cup && poured > 0.03;
-  barCupFill.position.y = 0.975 + poured * 0.06;
-  barCupFill.scale.setScalar(0.88 + poured * 0.12);
-  barCupFill.material.color.set(b.step === 'done' && b.drink?.milk ? '#c69a6d' : '#3b2314');
-  jug.visible = !brewing || b.drink.milk;
-  machineSteam(t, b.step === 'steam' && b.holding);
-
+  barista.update(dt, t);
   // the cup in your hand
   hand.visible = !!S.cup && (mode === 'walk' || mode === 'window');
   if (hand.visible) {
@@ -877,38 +848,56 @@ const ide = createIDE({
   },
   onUpdate: drawScreens,
 });
+function toggleRadio() {
+  S.radioOn = !S.radioOn;
+  initAudio();
+  toast(S.radioOn ? '♪ lo-fi beats to refactor to' : 'Music off');
+}
+const desktop = createDesktop({ S, onRadio: toggleRadio });
+
+// macOS-style wallpaper, menu bar, dock and one window; returns the window's content origin
+function macWindow(g, app, title, fill) {
+  const wall = g.createLinearGradient(0, 0, 640, 360);
+  wall.addColorStop(0, '#2b1f5c'); wall.addColorStop(0.4, '#7a3b8f'); wall.addColorStop(0.7, '#e0637a'); wall.addColorStop(1, '#f6a75c');
+  g.fillStyle = wall; g.fillRect(0, 0, 640, 360);
+  g.fillStyle = 'rgba(30,20,50,0.45)'; g.fillRect(0, 0, 640, 15);
+  g.fillStyle = '#ffffff'; g.font = 'bold 10px Segoe UI, sans-serif'; g.fillText(app, 22, 11);
+  g.font = '10px Segoe UI, sans-serif'; g.fillText('File   Edit   View   Window   Help', 60, 11);
+  g.beginPath(); g.arc(11, 7.5, 3.5, 0, Math.PI * 2); g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.25)'; g.beginPath(); g.roundRect(240, 328, 160, 26, 8); g.fill();
+  ['#0a66c2', '#f4f6fa', '#1bb83a', '#f9233f', '#fff3a3'].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.roundRect(250 + i * 29, 332, 22, 18, 5); g.fill(); });
+  g.fillStyle = fill; g.beginPath(); g.roundRect(14, 24, 612, 294, 7); g.fill();
+  g.fillStyle = 'rgba(255,255,255,0.08)'; g.beginPath(); g.roundRect(14, 24, 612, 20, [7, 7, 0, 0]); g.fill();
+  ['#ff5f57', '#febc2e', '#28c840'].forEach((c, i) => { g.fillStyle = c; g.beginPath(); g.arc(27 + i * 13, 34, 4, 0, Math.PI * 2); g.fill(); });
+  g.fillStyle = '#a0a0a0'; g.font = '11px Segoe UI, sans-serif'; g.textAlign = 'center'; g.fillText(title, 320, 38); g.textAlign = 'left';
+}
 
 function drawScreens() {
   const { ticket, code, lastRun } = ide.view();
-  const MONO = '15px Consolas, monospace';
+  const MONO = '14px Consolas, monospace';
 
-  // left monitor: the editor
+  // left display: the editor
   let g = codeScreen.image.getContext('2d');
-  g.fillStyle = '#1e1e1e'; g.fillRect(0, 0, 640, 360);
-  g.fillStyle = '#252526'; g.fillRect(0, 0, 640, 26);
-  g.fillStyle = '#1e1e1e'; g.fillRect(0, 0, 130, 26);
-  g.fillStyle = '#0078d4'; g.fillRect(0, 0, 130, 2);
-  g.fillStyle = '#007acc'; g.fillRect(0, 344, 640, 16);
-  g.font = '13px Consolas, monospace'; g.fillStyle = '#ffffff';
-  g.fillText('solution.py', 14, 18);
+  macWindow(g, 'Code', `solution.py — ${ticket.id}`, '#1e1e1e');
+  g.fillStyle = '#007acc'; g.fillRect(14, 306, 612, 12);
   g.font = MONO;
-  code.trimEnd().split('\n').slice(0, 17).forEach((line, i) => {
-    g.fillStyle = '#858585'; g.fillText(String(i + 1).padStart(2), 8, 50 + i * 18);
+  code.trimEnd().split('\n').slice(0, 14).forEach((line, i) => {
+    g.fillStyle = '#858585'; g.fillText(String(i + 1).padStart(2), 22, 64 + i * 17);
     g.fillStyle = line.trimStart().startsWith('#') ? '#6a9955' : /^\s*(def|class)\b/.test(line) ? '#dcdcaa' : '#d4d4d4';
-    g.fillText(line.slice(0, 64), 40, 50 + i * 18);
+    g.fillText(line.slice(0, 66), 52, 64 + i * 17);
   });
   codeScreen.needsUpdate = true;
 
-  // right monitor: a terminal
+  // right display: a terminal
   g = termScreen.image.getContext('2d');
-  g.fillStyle = '#0c0c0c'; g.fillRect(0, 0, 640, 360);
+  macWindow(g, 'Terminal', 'cozy-app — zsh', '#151517');
   g.font = MONO;
-  const rows = [['#cccccc', `$ git switch ${ticket.id.toLowerCase()}`], ['#cccccc', '$ python -m pytest -q']];
+  const rows = [['#cccccc', `% git switch ${ticket.id.toLowerCase()}`], ['#cccccc', '% python -m pytest -q']];
   if (!lastRun) rows.push(['#7f7f7f', 'waiting for a test run ...']);
   else if (lastRun.error) rows.push(['#f14c4c', 'error while loading solution.py']);
   else rows.push([lastRun.ok ? '#23d18b' : '#f14c4c', `${lastRun.passed} passed, ${lastRun.total - lastRun.passed} failed`]);
-  rows.push(['#cccccc', ''], ['#cccccc', '$ git log --oneline | wc -l'], ['#3b8eea', String(S.commits)], ['#cccccc', '$ _']);
-  rows.forEach(([color, text], i) => { g.fillStyle = color; g.fillText(text, 16, 34 + i * 22); });
+  rows.push(['#cccccc', ''], ['#cccccc', '% git log --oneline | wc -l'], ['#3b8eea', String(S.commits)], ['#cccccc', '% _']);
+  rows.forEach(([color, text], i) => { g.fillStyle = color; g.fillText(text, 26, 68 + i * 21); });
   termScreen.needsUpdate = true;
 }
 
@@ -919,11 +908,8 @@ interactive(bench, 'window', 'Gaze out the window', () => setMode('window'));
 interactive(desk, 'pc', 'Sit down and code', () => setMode('pc'));
 interactive(chair, 'pc', 'Sit down and code', () => setMode('pc'));
 interactive(lamp, 'lamp', () => (S.lampOn ? 'Turn lamp off' : 'Turn lamp on'), () => { S.lampOn = !S.lampOn; });
-interactive(radio, 'radio', () => (S.radioOn ? 'Turn radio off' : 'Play lo-fi radio'), () => {
-  S.radioOn = !S.radioOn;
-  toast(S.radioOn ? '♪ lo-fi beats to refactor to' : 'Radio off');
-});
-interactive(coffee, 'coffee', () => (S.cup ? 'Finish your cup first (Q to sip)' : 'Brew a coffee'), () => {
+interactive(radio, 'radio', () => (S.radioOn ? 'Turn radio off' : 'Play lo-fi radio'), toggleRadio);
+interactive(barista.group, 'coffee', () => (S.cup ? 'Finish your cup first (Q to sip)' : 'Brew a coffee'), () => {
   if (S.cup) return toast('You already have a cup in hand — press Q to sip.');
   setMode('barista');
   barista.open(S.coffee >= 3);
@@ -946,7 +932,6 @@ addEventListener('keydown', (e) => {
   }
   if (mode === 'barista') {
     if (e.code === 'Escape') leave();
-    else barista.key(e, true);
     return;
   }
   if (e.code === 'KeyQ') sip();
@@ -957,10 +942,7 @@ addEventListener('keydown', (e) => {
   keys.add(e.code);
   if (e.code === 'KeyE' && focusKey) interactions[focusKey].action();
 });
-addEventListener('keyup', (e) => {
-  keys.delete(e.code);
-  if (mode === 'barista') barista.key(e, false);
-});
+addEventListener('keyup', (e) => keys.delete(e.code));
 addEventListener('blur', () => keys.clear());
 canvas.addEventListener('click', () => {
   initAudio();
@@ -975,14 +957,15 @@ addEventListener('mousemove', (e) => {
     player.pitch = clamp(player.pitch - e.movementY * 0.0022, -1.4, 1.4);
   }
 });
-$('ideLeave').addEventListener('click', leave);
-$('ide').addEventListener('mousedown', initAudio);
-$('barista').addEventListener('mousedown', initAudio);
+$('macLeave').addEventListener('click', leave);
+$('mac').addEventListener('mousedown', initAudio);
 
 // ───────────────────────── HUD ─────────────────────────
 function updateHUD() {
   const h = Math.floor(S.hour), m = Math.floor((S.hour % 1) * 60);
-  $('clock').textContent = `Day ${S.day} · ${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+  const time = `${((h + 11) % 12) + 1}:${String(m).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`;
+  $('clock').textContent = `Day ${S.day} · ${time}`;
+  desktop.setClock(`Day ${S.day}  ${time}`);
   $('weather').textContent = S.raining ? 'Rainy — perfect coding weather' : day < 0.3 ? 'Clear night' : day < 0.9 ? 'Golden hour' : 'Clear skies';
   $('energyFill').style.width = `${S.energy}%`;
   $('energyNum').textContent = Math.round(S.energy);
@@ -1005,10 +988,32 @@ function updateHUD() {
 
 // ───────────────────────── loop ─────────────────────────
 let lastFrame = performance.now(), elapsed = 0;
-let hudTimer = 0;
+let hudTimer = 0, focusTimer = 0;
+
+// Once a second, trade resolution for frame rate: drop quality quickly when frames run slow,
+// and creep back up only after several steady seconds.
+const perf = { frames: 0, time: 0, steady: 0 };
+function tunePerformance(frameSeconds) {
+  if (frameSeconds > 0.5) { perf.frames = perf.time = 0; return; } // the window was hidden or stalled
+  perf.frames++;
+  perf.time += frameSeconds;
+  if (perf.time < 1) return;
+  const fps = perf.frames / perf.time;
+  perf.frames = perf.time = 0;
+  if (fps < 52 && quality > QUALITY_MIN) {
+    quality = Math.max(QUALITY_MIN, quality * 0.85);
+    perf.steady = 0;
+    applyQuality();
+  } else if (fps >= 58 && ++perf.steady >= 6 && quality < QUALITY_MAX) {
+    quality = Math.min(QUALITY_MAX, quality * 1.08);
+    perf.steady = 0;
+    applyQuality();
+  }
+}
 
 function tick() {
   const now = performance.now();
+  tunePerformance((now - lastFrame) / 1000);
   const dt = Math.min((now - lastFrame) / 1000, 0.1);
   lastFrame = now;
   elapsed += dt;
@@ -1027,7 +1032,8 @@ function tick() {
   updatePlayer(dt);
   updateCat(dt, t);
   updateCoffee(dt, t);
-  focusKey = findFocus();
+  focusTimer -= dt;
+  if (focusTimer <= 0) { focusKey = findFocus(); focusTimer = 0.08; }
 
   // little bits of life
   bulbs.forEach((b, i) => b.material.color.setHSL(0.1, 0.9, 0.62 + Math.sin(t * 1.5 + i) * 0.08));
@@ -1062,11 +1068,44 @@ tick();
 
 // hooks used by the smoke test in main.js
 window.__cozy = {
-  S, ide, barista, leave, catGo,
+  S, ide, barista, desktop, leave, catGo,
+  quality: () => quality,
   look(yaw, pitch) { player.yaw = yaw; player.pitch = pitch; },
   use(key) { interactions[key].action(); },
   setHour(h) { S.hour = h; },
-  skipTo(step) { barista.skipTo(step); },
+  // jump the espresso bar to a given moment, for screenshots
+  stage(patch, locs = {}) {
+    Object.assign(barista.state, patch);
+    for (const [name, loc] of Object.entries(locs)) barista.items[name].loc = loc;
+  },
+  // plays a whole espresso through real mouse events, to prove the drag-and-drop works
+  async baristaTest() {
+    const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+    const at = (x, y, z) => {
+      const v = new THREE.Vector3(x, y, z).project(camera);
+      return { clientX: ((v.x + 1) / 2) * innerWidth, clientY: ((1 - v.y) / 2) * innerHeight, button: 0, bubbles: true };
+    };
+    const fire = (type, where) => (type === 'mousedown' ? canvas : window).dispatchEvent(new MouseEvent(type, where));
+    const grab = (name) => { const p = barista.items[name].group.position; fire('mousemove', at(p.x, p.y, p.z)); fire('mousedown', at(p.x, p.y, p.z)); };
+    const carry = async (name, y, z, hold = 150) => { grab(name); await wait(60); fire('mousemove', at(3.5, y, z)); await wait(hold); fire('mouseup', {}); await wait(350); };
+    const drag = (name, loc) => carry(name, barista.spots[name][loc][1], barista.spots[name][loc][2]);
+    const press = async (x, y, z, hold) => { fire('mousemove', at(x, y, z)); fire('mousedown', at(x, y, z)); await wait(hold); fire('mouseup', {}); await wait(100); };
+    const st = barista.state, log = [];
+    await drag('pf', 'grinder'); log.push('pf@' + barista.items.pf.loc);
+    await press(3.68, 1.12, 2.038, 3000); log.push('dose=' + st.dose.toFixed(1));
+    await drag('pf', 'mat'); log.push('pf@' + barista.items.pf.loc);
+    await carry('tamper', 1.05, 1.68, 1700); log.push('tamp=' + st.tamp.toFixed(1) + ' tamped=' + st.tamped);
+    await drag('pf', 'group'); log.push('pf@' + barista.items.pf.loc);
+    await drag('cup', 'tray'); log.push('cup@' + barista.items.cup.loc);
+    await press(3.617, 1.285, 2.47, 80); log.push('brewing=' + st.brewing);
+    await wait(5300);
+    await press(3.617, 1.285, 2.47, 80); log.push('shot=' + st.shot.toFixed(1));
+    grab('cup'); await wait(60);
+    fire('mousemove', { clientX: innerWidth / 2, clientY: innerHeight * 0.93 }); await wait(150);
+    fire('mouseup', {}); await wait(100);
+    log.push('served=' + JSON.stringify(S.cup));
+    console.log('[barista-test] ' + log.join(' | '));
+  },
   giveCup() { leave(); S.cup = { name: 'Latte', stars: 4, sips: 4, energy: 8, cozy: 6, milk: true }; },
   // wipe the save and start from a fresh morning without writing anything back
   sandbox() {

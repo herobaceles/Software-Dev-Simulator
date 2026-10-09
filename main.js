@@ -55,11 +55,15 @@ async function runSmoke(win) {
       '5-ide-passing': `__cozy.ide.solve("${fixed}")`,
       '6-ide-loop': '__cozy.ide.solve("def paginate(items, page, size):\\n    while True:\\n        pass\\n")',
       '7-monitors': `__cozy.ide.solve("${fixed}").then(() => { __cozy.leave(); __cozy.look(-0.75, -0.1); })`,
-      '8-barista-menu': '__cozy.use("coffee")',
-      '9-barista-grind': '__cozy.barista.choose("latte"); __cozy.barista.press()',
-      '10-barista-pull': '__cozy.skipTo("pull"); __cozy.barista.press()',
-      '11-cup-in-hand': '__cozy.giveCup(); __cozy.look(-1.2, -0.1)',
+      '7b-mac-apps': '__cozy.use("pc"); ["safari", "messages", "music", "notes"].forEach(__cozy.desktop.openApp)',
+      '8-barista-start': '__cozy.leave(); __cozy.use("coffee")',
+      '8b-barista-played': '__cozy.baristaTest().then(() => __cozy.use("coffee"))',
+      '9-barista-grind': '__cozy.stage({ ctl: "grind", dose: 9 }, { pf: "grinder" })',
+      '10-barista-pull': '__cozy.stage({ ctl: null, dose: 18, tamp: 15, tamped: true, brewing: true }, { pf: "group", cup: "tray" })',
+      '10b-barista-steam': '__cozy.stage({ brewing: false, shot: 27, ctl: "steam", temp: 40 }, { jug: "wand" })',
+      '11-cup-in-hand': '__cozy.leave(); __cozy.look(-1.2, -0.1)',
       '12-night': '__cozy.setHour(21.5); __cozy.look(-0.3, -0.05)',
+      '13-fps': 'new Promise((done) => { let n = 0; const t0 = performance.now(); (function f() { n++; if (performance.now() - t0 < 2000) requestAnimationFrame(f); else { console.log("[fps] " + Math.round(n / 2) + " quality " + __cozy.quality().toFixed(2)); done(); } })(); })',
     })) {
       await wc.executeJavaScript(js);
       await wait(1700);

@@ -3,7 +3,7 @@ import { tickets } from './tickets.js';
 import { runPython, warmPython, pythonReady } from './python.js';
 
 const $ = (id) => document.getElementById(id);
-const PROMPT = 'PS C:\\cozy-app> ';
+const PROMPT = 'you@mac cozy-app % ';
 
 const FLOW = new Set(['return', 'if', 'elif', 'else', 'for', 'while', 'in', 'import', 'from', 'as', 'pass', 'break', 'continue', 'try', 'except', 'finally', 'raise', 'with', 'yield', 'assert']);
 const KEYWORDS = new Set(['def', 'class', 'lambda', 'not', 'and', 'or', 'is', 'None', 'True', 'False', 'global', 'nonlocal', 'del']);

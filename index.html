@@ -2,25 +2,27 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:">
+<meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval' 'sha256-Bufz0ylsvH5VX0RelLTkdCzDLj+JPhHmKTdEC0GXlzs='; worker-src 'self'; connect-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:">
 <title>Cozy Dev Sim</title>
+<script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script>
 <style>
   :root {
     --ink: #fdf3e3;
-    --panel: rgba(34, 24, 38, .78);
+    --panel: rgba(34, 24, 38, .9);
     --line: rgba(255, 220, 180, .18);
     --warm: #ffb86b;
     --rose: #f28b82;
     --mint: #9be3b4;
     --mono: Consolas, "Cascadia Code", "Courier New", monospace;
+    --sans: -apple-system, "SF Pro Text", "Segoe UI", system-ui, sans-serif;
   }
   * { box-sizing: border-box; }
   html, body { margin: 0; height: 100%; overflow: hidden; background: #1b1420; color: var(--ink);
-    font-family: "Segoe UI", system-ui, sans-serif; user-select: none; }
+    font-family: var(--sans); user-select: none; }
   canvas#view { position: fixed; inset: 0; width: 100%; height: 100%; display: block; }
 
   #hud { position: fixed; top: 16px; left: 16px; width: 230px; padding: 12px 14px; border-radius: 14px;
-    background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(6px); font-size: 13px; }
+    background: var(--panel); border: 1px solid var(--line); font-size: 13px; }
   #hud h1 { margin: 0 0 2px; font-size: 15px; font-weight: 600; }
   #hud .sub { opacity: .75; margin-bottom: 10px; }
   .bar { margin: 6px 0; }
@@ -52,56 +54,118 @@
   #caption.on { opacity: .95; }
 
   #toasts { position: fixed; right: 16px; top: 16px; display: flex; flex-direction: column; gap: 8px; align-items: flex-end;
-    pointer-events: none; z-index: 5; }
+    pointer-events: none; z-index: 50; }
   .toast { padding: 9px 14px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); font-size: 13px;
     animation: pop 3.2s forwards; }
   @keyframes pop { 0% { opacity: 0; transform: translateY(-8px); } 8%, 85% { opacity: 1; transform: none; } 100% { opacity: 0; } }
 
   #fade { position: fixed; inset: 0; background: #0a0710; opacity: 0; transition: opacity 1.4s; pointer-events: none;
-    display: flex; align-items: center; justify-content: center; font-size: 26px; letter-spacing: 1px; z-index: 6; }
+    display: flex; align-items: center; justify-content: center; font-size: 26px; letter-spacing: 1px; z-index: 60; }
   #fade.on { opacity: 1; }
 
-  /* ── barista ── */
-  #barista { position: fixed; left: 50%; bottom: 34px; transform: translate(-50%, 12px); width: 480px; padding: 16px 20px 18px;
-    border-radius: 16px; background: var(--panel); border: 1px solid var(--line); backdrop-filter: blur(8px);
-    opacity: 0; pointer-events: none; transition: opacity .3s, transform .3s; text-align: center; }
-  #barista.on { opacity: 1; pointer-events: auto; transform: translate(-50%, 0); }
-  #baStep { font-size: 11px; letter-spacing: 1.5px; opacity: .7; }
-  #baTitle { margin: 4px 0 4px; font-size: 20px; font-weight: 600; }
-  #baHint { margin: 0 0 12px; font-size: 13px; opacity: .85; }
-  #baMenu { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  #baMenu button, #baBtn { font: inherit; color: var(--ink); background: rgba(255,255,255,.1); border: 1px solid var(--line);
-    border-radius: 10px; padding: 10px; cursor: pointer; }
-  #baMenu button:hover, #baBtn:hover { background: rgba(255,255,255,.18); }
-  #baMenu small { display: block; opacity: .65; font-size: 11px; margin-top: 2px; }
-  #baMeter { position: relative; height: 18px; border-radius: 9px; background: rgba(255,255,255,.12); overflow: hidden; margin-bottom: 10px; }
-  #baZone { position: absolute; top: 0; bottom: 0; background: rgba(155, 227, 180, .55); }
-  #baFill { position: absolute; left: 0; top: 0; bottom: 0; background: rgba(255, 184, 107, .5); }
-  #baMark { position: absolute; top: -2px; bottom: -2px; width: 4px; margin-left: -2px; background: #fff; border-radius: 2px; }
-  #baNote { min-height: 18px; margin: 0 0 10px; font-size: 13px; font-style: italic; }
-  #baNote.good { color: var(--mint); }
-  #baNote.meh { color: var(--warm); }
-  #baBtn { min-width: 200px; }
+  /* ── barista: just a line of guidance and four read-outs; the work happens in 3D ── */
+  #barista { position: fixed; left: 50%; bottom: 22px; transform: translateX(-50%); width: min(760px, 92vw); text-align: center;
+    opacity: 0; transition: opacity .3s; pointer-events: none; }
+  #barista.on { opacity: 1; }
+  #baHint { display: inline-block; padding: 9px 18px; border-radius: 20px; background: var(--panel); border: 1px solid var(--line);
+    font-size: 14px; }
+  #baHint.warn { color: var(--warm); }
+  #baChips { margin-top: 8px; display: flex; justify-content: center; gap: 8px; }
+  #baChips span { padding: 4px 12px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line);
+    font: 12px var(--mono); opacity: .75; }
+  #baChips span.good { color: var(--mint); opacity: 1; }
+  #baChips span.off { color: var(--warm); opacity: 1; }
 
-  /* ── IDE (VS Code look) ── */
-  #ide { position: fixed; left: 50%; top: 50%; transform: translate(-50%, -50%) scale(.97); width: min(1180px, 95vw);
-    height: min(720px, 93vh); display: flex; flex-direction: column; border-radius: 9px; overflow: hidden;
-    background: #1e1e1e; border: 1px solid #454545; box-shadow: 0 24px 80px rgba(0,0,0,.65); color: #cccccc; font-size: 13px;
-    opacity: 0; pointer-events: none; transition: opacity .35s, transform .35s; }
-  #ide.on { opacity: 1; pointer-events: auto; transform: translate(-50%, -50%); }
-  #ide .grow { flex: 1; }
-  #ide button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
-  #vsTitle { height: 32px; flex: none; display: flex; align-items: center; background: #323233; font-size: 12px; }
-  #vsTitle .logo { width: 36px; text-align: center; color: #23a9f2; font-size: 15px; }
-  #vsTitle .menu span { padding: 0 7px; color: #cccccc; }
-  #ideTitle { flex: 1; text-align: center; color: #9d9d9d; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  #ideLeave { height: 32px; padding: 0 14px; color: #cccccc; }
-  #ideLeave:hover { background: #e81123; color: #fff; }
+  /* ── the Mac ── */
+  #mac { position: fixed; inset: 2.5vh 2.5vw; display: flex; flex-direction: column; border: 9px solid #0b0b0d; border-radius: 16px;
+    overflow: hidden; background: linear-gradient(135deg, #2b1f5c 0%, #7a3b8f 38%, #e0637a 68%, #f6a75c 100%);
+    box-shadow: 0 0 0 2px #2a2a2e, 0 30px 90px rgba(0,0,0,.7); color: #1d1d1f; font-size: 13px;
+    opacity: 0; pointer-events: none; transform: scale(.97); transition: opacity .35s, transform .35s; z-index: 10; }
+  #mac.on { opacity: 1; pointer-events: auto; transform: none; }
+  #mac button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
+  #mac .grow { flex: 1; }
+  #macMenu { height: 26px; flex: none; display: flex; align-items: center; gap: 16px; padding: 0 12px; color: #fff;
+    background: rgba(30, 20, 50, .35); backdrop-filter: blur(20px); font-size: 13px; }
+  #macMenu svg { width: 14px; height: 16px; fill: #fff; }
+  #macApp { font-weight: 700; }
+  #mac #macLeave { padding: 1px 10px; border-radius: 6px; background: rgba(255,255,255,.18); }
+  #mac #macLeave:hover { background: rgba(255,255,255,.3); }
+  #macDesk { position: relative; flex: 1; min-height: 0; }
+  #dock { position: absolute; left: 50%; bottom: 8px; transform: translateX(-50%); display: flex; gap: 10px; padding: 7px 10px;
+    border-radius: 18px; background: rgba(255,255,255,.22); border: 1px solid rgba(255,255,255,.3); backdrop-filter: blur(20px); z-index: 9999; }
+  #dock button { position: relative; width: 46px; height: 46px; border-radius: 11px; font-size: 24px; display: flex;
+    align-items: center; justify-content: center; transition: transform .15s; box-shadow: 0 2px 6px rgba(0,0,0,.3); }
+  #dock button:hover { transform: translateY(-6px) scale(1.12); }
+  #dock button.running::after { content: ""; position: absolute; bottom: -6px; left: 50%; width: 4px; height: 4px; margin-left: -2px;
+    border-radius: 50%; background: rgba(255,255,255,.9); }
+  #dock .code { background: linear-gradient(#2aa7f5, #0a66c2); color: #fff; font: 700 15px var(--mono); }
+  #dock .safari { background: linear-gradient(#fdfdfd, #d9e6f5); }
+  #dock .messages { background: linear-gradient(#5ff078, #1bb83a); }
+  #dock .music { background: linear-gradient(#ff5e74, #f9233f); }
+  #dock .notes { background: linear-gradient(#fff3a3 0 28%, #fffdf5 28%); }
+
+  .win { position: absolute; display: none; flex-direction: column; border-radius: 10px; overflow: hidden; background: #f6f6f6;
+    border: 1px solid rgba(0,0,0,.35); box-shadow: 0 18px 50px rgba(0,0,0,.45); }
+  .win.open { display: flex; }
+  .win .bar { height: 30px; flex: none; margin: 0; display: flex; align-items: center; gap: 10px; padding: 0 12px; background: #e8e6e8;
+    border-bottom: 1px solid #d0cdd0; cursor: default; }
+  .win .bar .title { flex: 1; text-align: center; font-weight: 600; font-size: 12.5px; color: #4a4a4c; white-space: nowrap;
+    overflow: hidden; text-overflow: ellipsis; margin-right: 52px; }
+  .lights { display: flex; gap: 8px; }
+  .lights i { width: 12px; height: 12px; border-radius: 50%; background: #febc2e; }
+  .lights i:first-child { background: #ff5f57; cursor: pointer; }
+  .lights i:last-child { background: #28c840; }
+  .win:not(.front) .lights i { background: #cfcdcf; }
+
+  [data-app="safari"] { left: 30%; top: 7%; width: 560px; height: 470px; }
+  #safariTool { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: #f0eef0; border-bottom: 1px solid #d0cdd0; }
+  #safariUrl { flex: 1; text-align: center; padding: 4px; border-radius: 7px; background: #e1dfe1; color: #555; font-size: 12px; }
+  #safariNav { display: flex; gap: 4px; padding: 8px 14px 0; background: #fff; }
+  #safariNav button { padding: 4px 11px; border-radius: 14px; color: #555; }
+  #safariNav button.act { background: #0a66c2; color: #fff; }
+  #safariPages { flex: 1; overflow: auto; padding: 6px 18px 16px; background: #fff; user-select: text; line-height: 1.5; }
+  #safariPages h2 { margin: 10px 0 4px; font-size: 18px; }
+  #safariPages pre { margin: 6px 0 12px; padding: 9px 12px; border-radius: 8px; background: #f3f4f6; font: 12.5px/1.5 var(--mono); white-space: pre-wrap; }
+
+  [data-app="messages"] { left: 8%; top: 16%; width: 360px; height: 430px; background: #fff; }
+  #chatLog { flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 6px; }
+  .msg { max-width: 82%; align-self: flex-start; }
+  .msg b { display: block; margin: 4px 0 2px 10px; font-size: 10.5px; color: #8e8e93; font-weight: 500; }
+  .msg span { display: inline-block; padding: 7px 12px; border-radius: 16px; background: #e9e9eb; user-select: text; }
+  .msg.me { align-self: flex-end; }
+  .msg.me span { background: #0a84ff; color: #fff; }
+  #chatForm { display: flex; padding: 8px 10px; border-top: 1px solid #e3e3e6; }
+  #chatInput { flex: 1; padding: 6px 12px; border-radius: 16px; border: 1px solid #c9c9ce; outline: 0; font: inherit; }
+
+  [data-app="music"] { left: 62%; top: 52%; width: 300px; height: 190px; background: linear-gradient(160deg, #3a2a4d, #1f1a2e); color: #fff; }
+  [data-app="music"] .bar { background: transparent; border: 0; }
+  [data-app="music"] .bar .title { color: #d8d0e6; }
+  #musicBody { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 8px; }
+  #musicTitle { font-weight: 600; font-size: 15px; }
+  #musicBody small { opacity: .6; }
+  #musicBars { display: flex; align-items: flex-end; gap: 4px; height: 22px; }
+  #musicBars i { width: 4px; height: 4px; border-radius: 2px; background: #ff7a90; }
+  #musicBars.playing i { animation: eq .9s ease-in-out infinite alternate; }
+  #musicBars i:nth-child(2) { animation-delay: .2s; } #musicBars i:nth-child(3) { animation-delay: .45s; }
+  #musicBars i:nth-child(4) { animation-delay: .1s; } #musicBars i:nth-child(5) { animation-delay: .6s; }
+  @keyframes eq { to { height: 22px; } }
+  #musicCtl button { width: 40px; height: 32px; font-size: 17px; color: #fff; border-radius: 8px; }
+  #musicCtl button:hover { background: rgba(255,255,255,.14); }
+
+  [data-app="notes"] { left: 56%; top: 9%; width: 320px; height: 300px; background: #fffdf5; }
+  [data-app="notes"] .bar { background: #fbe9a6; border-color: #ecd98e; }
+  #notesText { flex: 1; padding: 12px 14px; border: 0; outline: 0; resize: none; background: transparent; font: 14px/1.5 var(--sans);
+    color: #3a3220; user-select: text; }
+
+  /* ── VS Code, inside a Mac window ── */
+  #ide { left: 1.5%; top: 2%; width: 82%; height: 84%; background: #1e1e1e; color: #cccccc; border-color: #000; }
+  #ide .bar { background: #323233; border-color: #252526; }
+  #ide .bar .title { color: #9d9d9d; font-weight: 400; }
   #vsBody { flex: 1; display: flex; min-height: 0; }
   #vsActivity { width: 48px; flex: none; background: #333333; display: flex; flex-direction: column; align-items: center; padding-top: 6px; }
   #vsActivity span { width: 48px; height: 46px; display: flex; align-items: center; justify-content: center; font-size: 21px; color: #858585; }
   #vsActivity span.act { color: #fff; box-shadow: inset 2px 0 0 #fff; }
-  #vsSide { width: 250px; flex: none; background: #252526; overflow: auto; }
+  #vsSide { width: 240px; flex: none; background: #252526; overflow: auto; }
   #vsSide .head { padding: 10px 20px 8px; font-size: 11px; letter-spacing: .5px; color: #bbbbbb; }
   #vsSide .sect { padding: 4px 8px; font-size: 11px; font-weight: 700; color: #cccccc; border-top: 1px solid #3c3c3c; }
   #vsSide .file { padding: 3px 8px 3px 26px; cursor: pointer; display: flex; align-items: center; gap: 6px; }
@@ -128,7 +192,7 @@
   #editor::selection { background: rgba(38, 79, 120, .85); color: transparent; }
   #hl .c { color: #6a9955; } #hl .s { color: #ce9178; } #hl .n { color: #b5cea8; }
   #hl .k { color: #569cd6; } #hl .k2 { color: #c586c0; } #hl .f { color: #dcdcaa; } #hl .v { color: #9cdcfe; }
-  #vsPanel { height: 200px; flex: none; display: flex; flex-direction: column; border-top: 1px solid #454545; }
+  #vsPanel { height: 190px; flex: none; display: flex; flex-direction: column; border-top: 1px solid #454545; }
   #panelTabs { height: 35px; flex: none; display: flex; align-items: center; gap: 4px; padding: 0 10px; font-size: 11px; }
   #panelTabs > span { padding: 4px 10px; color: #969696; }
   #panelTabs > span.act { color: #e7e7e7; box-shadow: inset 0 -1px 0 #e7e7e7; }
@@ -143,6 +207,9 @@
   #output .ok { color: #23d18b; } #output .bad { color: #f14c4c; } #output .log { color: #3b8eea; }
   #output .dim { color: #7f7f7f; }
   #vsStatus { height: 22px; flex: none; display: flex; align-items: center; background: #007acc; color: #fff; font-size: 12px; }
+  #mac ::-webkit-scrollbar { width: 10px; height: 10px; }
+  #mac ::-webkit-scrollbar-thumb { background: rgba(128,128,128,.45); border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+  #mac ::-webkit-scrollbar-track, #mac ::-webkit-scrollbar-corner { background: transparent; }
   #vsStatus span { padding: 0 9px; white-space: nowrap; }
 </style>
 </head>
@@ -170,68 +237,150 @@
 <div id="toasts"></div>
 
 <div id="barista">
-  <div id="baStep"></div>
-  <h2 id="baTitle"></h2>
-  <p id="baHint"></p>
-  <div id="baMenu">
-    <button data-drink="espresso">1 · Espresso<small>short and strong · 2 sips</small></button>
-    <button data-drink="americano">2 · Americano<small>long and mellow · 4 sips</small></button>
-    <button data-drink="latte">3 · Latte<small>steamed milk · extra cozy</small></button>
-    <button data-drink="cappuccino">4 · Cappuccino<small>thick foam · coziest</small></button>
-  </div>
-  <div id="baMeter"><div id="baZone"></div><div id="baFill"></div><div id="baMark"></div></div>
-  <p id="baNote"></p>
-  <button id="baBtn"></button>
+  <div id="baHint"></div>
+  <div id="baChips"><span id="baDose"></span><span id="baTamp"></span><span id="baShot"></span><span id="baMilk"></span></div>
 </div>
 
-<div id="ide">
-  <div id="vsTitle">
-    <span class="logo">&#x2B22;</span>
-    <span class="menu"><span>File</span><span>Edit</span><span>Selection</span><span>View</span><span>Go</span><span>Run</span><span>Terminal</span><span>Help</span></span>
-    <span id="ideTitle"></span>
-    <button id="ideLeave" title="Stand up (Esc)">&#x2715;</button>
+<div id="mac">
+  <div id="macMenu">
+    <svg viewBox="0 0 14 16"><path d="M9.6 2.6c.6-.7 1-1.700.9-2.600-.9 0-1.900.6-2.500 1.300-.5.600-1 1.600-.9 2.500 1 .1 1.900-.5 2.500-1.200zM11.700 8.500c0-1.800 1.500-2.700 1.600-2.700-.9-1.300-2.200-1.400-2.700-1.500-1.100-.1-2.200.7-2.800.7-.6 0-1.500-.7-2.400-.6C4.100 4.400 3 5.100 2.400 6.200c-1.300 2.200-.3 5.500.9 7.300.6.900 1.300 1.900 2.300 1.800.9 0 1.300-.6 2.400-.6s1.400.6 2.400.6 1.600-.9 2.200-1.800c.7-1 1-2 1-2.100-.1 0-1.900-.7-1.900-2.900z"/></svg>
+    <span id="macApp">Code</span><span>File</span><span>Edit</span><span>View</span><span>Go</span><span>Window</span><span>Help</span>
+    <span class="grow"></span>
+    <button id="macLeave">Stand up (Esc)</button>
+    <span id="macClock"></span>
   </div>
-  <div id="vsBody">
-    <div id="vsActivity">
-      <span class="act" title="Explorer">&#x29C9;</span><span title="Search">&#x2315;</span><span title="Source Control">&#x2442;</span><span title="Run and Debug">&#x25B7;</span><span title="Extensions">&#x229E;</span>
-    </div>
-    <div id="vsSide">
-      <div class="head">EXPLORER</div>
-      <div class="sect">&#x2304; COZY-APP</div>
-      <div class="file act" data-tab="solution"><span class="pyIcon">py</span>solution.py</div>
-      <div class="file" data-tab="tests"><span class="pyIcon">py</span>test_solution.py</div>
-      <div class="sect" style="margin-top:10px">&#x2304; TICKET</div>
-      <div id="ticketDesc"></div>
-      <div class="sect">&#x2304; UP NEXT</div>
-      <div id="backlog"></div>
-    </div>
-    <div id="vsMain">
-      <div id="vsTabs">
-        <div class="tab act" data-tab="solution"><span class="pyIcon">py</span>solution.py</div>
-        <div class="tab" data-tab="tests"><span class="pyIcon">py</span>test_solution.py</div>
-        <span class="grow"></span>
-        <button id="btnRun" title="Run tests (Ctrl+Enter)">&#x25B7;</button>
-      </div>
-      <div id="vsCrumbs"></div>
-      <div id="vsEditor">
-        <pre id="gutter"></pre>
-        <div id="edStack"><pre id="hl"></pre><textarea id="editor" spellcheck="false" autocomplete="off" wrap="off"></textarea></div>
-      </div>
-      <div id="vsPanel">
-        <div id="panelTabs">
-          <span>PROBLEMS</span><span>OUTPUT</span><span class="act">TERMINAL</span>
-          <span class="grow"></span>
-          <button id="btnReset">Reset file</button>
-          <button id="btnRunTests">&#x25B7; Run Tests</button>
-          <button id="btnCommit" disabled>&#x2713; Commit</button>
+  <div id="macDesk">
+
+    <div class="win" id="ide" data-app="code">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="title" id="ideTitle"></span></div>
+      <div id="vsBody">
+        <div id="vsActivity">
+          <span class="act" title="Explorer">&#x29C9;</span><span title="Search">&#x2315;</span><span title="Source Control">&#x2442;</span><span title="Run and Debug">&#x25B7;</span><span title="Extensions">&#x229E;</span>
         </div>
-        <pre id="output"></pre>
+        <div id="vsSide">
+          <div class="head">EXPLORER</div>
+          <div class="sect">&#x2304; COZY-APP</div>
+          <div class="file act" data-tab="solution"><span class="pyIcon">py</span>solution.py</div>
+          <div class="file" data-tab="tests"><span class="pyIcon">py</span>test_solution.py</div>
+          <div class="sect" style="margin-top:10px">&#x2304; TICKET</div>
+          <div id="ticketDesc"></div>
+          <div class="sect">&#x2304; UP NEXT</div>
+          <div id="backlog"></div>
+        </div>
+        <div id="vsMain">
+          <div id="vsTabs">
+            <div class="tab act" data-tab="solution"><span class="pyIcon">py</span>solution.py</div>
+            <div class="tab" data-tab="tests"><span class="pyIcon">py</span>test_solution.py</div>
+            <span class="grow"></span>
+            <button id="btnRun" title="Run tests (Ctrl+Enter)">&#x25B7;</button>
+          </div>
+          <div id="vsCrumbs"></div>
+          <div id="vsEditor">
+            <pre id="gutter"></pre>
+            <div id="edStack"><pre id="hl"></pre><textarea id="editor" spellcheck="false" autocomplete="off" wrap="off"></textarea></div>
+          </div>
+          <div id="vsPanel">
+            <div id="panelTabs">
+              <span>PROBLEMS</span><span>OUTPUT</span><span class="act">TERMINAL</span>
+              <span class="grow"></span>
+              <button id="btnReset">Reset file</button>
+              <button id="btnRunTests">&#x25B7; Run Tests</button>
+              <button id="btnCommit" disabled>&#x2713; Commit</button>
+            </div>
+            <pre id="output"></pre>
+          </div>
+        </div>
+      </div>
+      <div id="vsStatus">
+        <span>&#x2442; main</span><span id="ideStatus"></span><span class="grow"></span>
+        <span id="lnCol">Ln 1, Col 1</span><span>Spaces: 4</span><span>UTF-8</span><span>LF</span><span>Python 3 (Pyodide)</span>
       </div>
     </div>
-  </div>
-  <div id="vsStatus">
-    <span>&#x2442; main</span><span id="ideStatus"></span><span class="grow"></span>
-    <span id="lnCol">Ln 1, Col 1</span><span>Spaces: 4</span><span>UTF-8</span><span>LF</span><span>Python 3 (Pyodide)</span>
+
+    <div class="win" data-app="safari">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="title">Python Pocket Guide</span></div>
+      <div id="safariTool"><span>&#x2039;</span><span>&#x203A;</span><span id="safariUrl">docs.cozy.dev/python/lists</span><span>&#x21BB;</span></div>
+      <div id="safariNav">
+        <button class="act" data-page="lists">Lists</button><button data-page="strings">Strings</button><button data-page="dicts">Dicts</button><button data-page="loops">Loops</button>
+      </div>
+      <div id="safariPages">
+        <div data-page="lists">
+          <h2>Lists and slicing</h2>
+          A slice <code>items[start:end]</code> includes <code>start</code> and stops <em>before</em> <code>end</code>.
+          <pre>nums = [1, 2, 3, 4, 5]
+nums[0:2]      # [1, 2]
+nums[2:]       # [3, 4, 5]
+nums[::-1]     # reversed copy
+nums.append(6) # add to the end
+out.extend(more)   # add every item of another list
+isinstance(x, list)   # is x a list?</pre>
+          <pre>for i in range(0, len(nums), 2):   # 0, 2, 4, ...
+    pair = nums[i:i + 2]</pre>
+        </div>
+        <div data-page="strings" hidden>
+          <h2>Strings</h2>
+          <pre>text.lower()            # 'Tea' -> 'tea'
+text.split()            # split on whitespace
+ch.isalnum()            # letter or digit?
+"".join(parts)          # glue a list of strings
+" ".join(["1h", "5s"])  # '1h 5s'
+f"{hours}h"             # f-string
+text == text[::-1]      # same backwards?</pre>
+          <pre>clean = "".join(ch for ch in text.lower() if ch.isalnum())</pre>
+        </div>
+        <div data-page="dicts" hidden>
+          <h2>Dictionaries</h2>
+          <pre>counts = {}
+counts[word] = counts.get(word, 0) + 1
+
+groups = {}
+groups.setdefault(key, []).append(item)
+
+for key, value in counts.items():
+    print(key, value)</pre>
+        </div>
+        <div data-page="loops" hidden>
+          <h2>Loops and numbers</h2>
+          <pre>for n in range(1, 6):     # 1, 2, 3, 4, 5
+    if n % 15 == 0: ...
+    elif n % 3 == 0: ...
+
+hours, rest = divmod(seconds, 3600)   # quotient and remainder
+minutes, secs = divmod(rest, 60)
+
+squares = [n * n for n in range(5)]   # list comprehension</pre>
+        </div>
+      </div>
+    </div>
+
+    <div class="win" data-app="messages">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="title">#cozy-team</span></div>
+      <div id="chatLog"></div>
+      <form id="chatForm"><input id="chatInput" placeholder="Message #cozy-team" autocomplete="off"></form>
+    </div>
+
+    <div class="win" data-app="music">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="title">Music</span></div>
+      <div id="musicBody">
+        <div id="musicBars"><i></i><i></i><i></i><i></i><i></i></div>
+        <div id="musicTitle"></div>
+        <small>lo-fi radio</small>
+        <div id="musicCtl"><button id="musicPrev">&#x23EE;</button><button id="musicPlay"></button><button id="musicNext">&#x23ED;</button></div>
+      </div>
+    </div>
+
+    <div class="win" data-app="notes">
+      <div class="bar"><span class="lights"><i></i><i></i><i></i></span><span class="title">Notes</span></div>
+      <textarea id="notesText" spellcheck="false" placeholder="Scratch notes, pseudo-code, a to-do list..."></textarea>
+    </div>
+
+    <div id="dock">
+      <button class="code" data-open="code" title="Code">&lt;/&gt;</button>
+      <button class="safari" data-open="safari" title="Safari">&#x1F9ED;</button>
+      <button class="messages" data-open="messages" title="Messages">&#x1F4AC;</button>
+      <button class="music" data-open="music" title="Music">&#x1F3B5;</button>
+      <button class="notes" data-open="notes" title="Notes">&#x1F4DD;</button>
+    </div>
   </div>
 </div>
 
